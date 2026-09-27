@@ -1,8 +1,13 @@
-// 占位入口（T-P0-01）：mock-gateway 的 Fastify 应用与 /_test 控制平面归 T-P1-01。
-// 此刻仅保持 dev 进程存活并打就绪日志（不占用端口，避免与正式实现抢 4100）。
+// 可执行入口（DES/14 §1：单进程、内存状态；默认实例 :4100，AGENTS.md 端口约定）。
+import { createGatewayApp } from './app.js';
+
 const PORT = Number(process.env.PORT ?? 4100);
 
-console.log(`[mock-gateway] placeholder entry (PORT=${PORT}); Fastify app + /_test plane land in T-P1-01`);
+const app = createGatewayApp({ logger: true });
 
-// 悬空定时器保活：占位阶段无服务可跑，维持进程存在即可
-setInterval(() => {}, 60_000);
+try {
+  await app.listen({ port: PORT, host: '0.0.0.0' });
+} catch (err) {
+  app.log.error({ err }, 'mock-gateway failed to start');
+  process.exit(1);
+}
