@@ -17,6 +17,7 @@ import {
   SEND504_LAND_MS,
   UNAVAILABLE_BODY,
 } from './switches/outbound.js';
+import { isLeaveForced500 } from './switches/group-lifecycle.js';
 
 // —— 契约时序（QR §1 / REQ §2.1）；mock 自持（不依赖 server 的 constants.ts）——
 // send 202（gw-1）/ message_sent（gw-2）归 switches/basic.ts；504 后 1.5s 落地（gw-7）归 switches/outbound.ts。
@@ -226,7 +227,8 @@ export function registerMessagingRoutes(app: FastifyInstance, state: GatewayStat
     if (account === undefined) {
       return reply.code(400).send({ message: `unknown account: ${body.accountId}` });
     }
-    if (activeSwitch(state, 'leave_500', { groupId, accountId: body.accountId }) !== undefined) {
+    // gw-26 `leave_500`：leave → 500（没退成：成员保留、不推 member_left；QR §2 leave-all 记 errors[]）
+    if (isLeaveForced500(state, { groupId, accountId: body.accountId })) {
       return reply.code(500).send({ message: 'leave failed' });
     }
     if (group.members.delete(account.platformUserId)) {

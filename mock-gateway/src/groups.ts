@@ -1,18 +1,19 @@
 // 群生命周期端点（T-P1-03）：create / invite / join / promote。
 // 契约出处：REQ §2.1 群与成员节（字段名与响应形状逐字）；DES/14 §2（状态模型）、§3（时序引擎）。
 // 时序默认区间随机、/_test/scenario 可钉死（任务卡 d 项；DES/14 §3）。
+// 开关判定归 switches/*：member_joined 延迟（gw-19）→ timing.ts；建群类（gw-18/20/21/22/23）→ group-lifecycle.ts。
 // kick / leave / send / members / by-client-id 归 T-P1-04，不在本文件。
 import type { FastifyInstance } from 'fastify';
 import { assertAccountOperationAllowed, assertConnectAllowed, type AccountGateError } from './accounts.js';
 import { appendLedger, type GatewayState } from './state.js';
-import { activeSwitch, randomBetween, readNumberParam } from './switches.js';
+import {
+  consumePromoteNotMemberYet,
+  isAlreadyMemberForced,
+  isInviteExpired,
+  isMemberJoinedNever,
+  resolveInviteReadyAfterMs,
+} from './switches/group-lifecycle.js';
 import { resolveMemberJoinedDelayMs } from './switches/timing.js';
-
-// —— 契约时序（QR §1 / REQ §2.1）；mock 自己持有（mock 不依赖 server 的 constants.ts）——
-// member_joined 的钉值/区间解析归 switches/timing.ts（gw-19，T-P2-12）。
-/** invite 的 readyAfterMs「0 或数秒」（REQ §2.1）：数秒档的 mock 内部默认区间（非契约数字） */
-const INVITE_READY_SLOW_MIN_MS = 2000;
-const INVITE_READY_SLOW_MAX_MS = 5000;
 
 function sendGateError(reply: { code: (s: number) => { send: (b: unknown) => unknown } }, gate: AccountGateError) {
   reply.code(gate.statusCode).send(gate.body);
@@ -53,9 +54,8 @@ export function registerGroupRoutes(app: FastifyInstance, state: GatewayState): 
     if (group === undefined) {
       return reply.code(404).send({ message: `unknown group: ${groupId}` });
     }
-    const pinnedReady = readNumberParam(activeSwitch(state, 'invite_not_ready', { groupId }), 'readyAfterMs');
-    const readyAfterMs =
-      pinnedReady ?? (Math.random() < 0.5 ? 0 : randomBetween(INVITE_READY_SLOW_MIN_MS, INVITE_READY_SLOW_MAX_MS));
+    // gw-20 `invite_not_ready`：钉值优先，否则契约的「可能是 0，也可能几秒」（REQ §2.1）
+    const readyAfterMs = resolveInviteReadyAfterMs(state, groupId);
     const link = `inv-${groupId}-${++state.msgSeq}`;
     group.invite = { link, readyAt: Date.now() + readyAfterMs };
     return reply.send({ inviteLink: link, readyAfterMs });
@@ -84,9 +84,9 @@ export function registerGroupRoutes(app: FastifyInstance, state: GatewayState): 
       return reply.code(400).send({ message: `unknown account: ${body.accountId}` });
     }
 
-    // 开关 21（invite_expired）按 DES/14 §5 是「join → 410」：join 时刻读开关，
-    // 与 invite 创建时刻解耦（开关可能在 invite 之后才打开）
-    if (activeSwitch(state, 'invite_expired', { groupId }) !== undefined) {
+    // gw-21 `invite_expired`：按 DES/14 §5 是「join → 410」——join 时刻读开关，与 invite 创建时刻解耦
+    // （链接任意时刻可能过期，开关也可能在 invite 之后才打开；QR §2：重新申请链接，重试一次）
+    if (isInviteExpired(state, groupId)) {
       return reply.code(410).send({ code: 'INVITE_EXPIRED', message: 'invite link expired' });
     }
     const invite = group.invite;
@@ -101,14 +101,17 @@ export function registerGroupRoutes(app: FastifyInstance, state: GatewayState): 
         readyAfterMs: remainingReadyMs,
       });
     }
-    if (group.members.has(account.platformUserId)) {
-      // 已在群：409 且不再推 member_joined（REQ §2.1）
+    const joinTarget = { groupId, accountId: body.accountId };
+    if (group.members.has(account.platformUserId) || isAlreadyMemberForced(state, joinTarget)) {
+      // 已在群（自然）或 gw-22 强制「视为已在群」：409 且**不推** member_joined（REQ §2.1 明文；
+      // server 侧 D2-2 的成员行 UPSERT 依赖这条）。强制路径补齐成员集——QR §2「视为成功，直接 promote」
+      // 要求随后的 promote 能成，mock 状态不能自相矛盾（已在群时 add 是幂等无操作）。
+      group.members.add(account.platformUserId);
       return reply.code(409).send({ code: 'ALREADY_MEMBER', message: 'account already in group' });
     }
 
-    // 202 受理；入群与事件按契约时序延后（钉值或区间随机），也可能永不到（gw-18）
-    const joinTarget = { groupId, accountId: body.accountId };
-    if (activeSwitch(state, 'member_joined_never', joinTarget) === undefined) {
+    // 202 受理；入群与事件按契约时序延后（钉值或区间随机），也可能永不到（gw-18：此时账号并未入群）
+    if (!isMemberJoinedNever(state, joinTarget)) {
       const delayMs = resolveMemberJoinedDelayMs(state, joinTarget);
       const puid = account.platformUserId;
       setTimeout(() => {
@@ -145,9 +148,14 @@ export function registerGroupRoutes(app: FastifyInstance, state: GatewayState): 
     if (byAccount === undefined || byAccount.platformUserId !== group.creator) {
       return reply.code(403).send({ code: 'NO_PERMISSION', message: 'promote requires the group owner' });
     }
+    // gw-23 `promote_not_member_yet`：前 N 次调用强制 409（驱动 server 的「重试、总调用 ≤2」，QR §2）；
+    // 配额用尽后落到自然判定——「对方 member_joined 之前」：不在网关成员集 = 事件未到（REQ §2.1）
     const promotee = state.accounts.get(body.accountId);
-    if (promotee === undefined || !group.members.has(promotee.platformUserId)) {
-      // 「对方 member_joined 之前」：不在网关成员集 = 事件未到（REQ §2.1）
+    if (
+      consumePromoteNotMemberYet(state, { groupId, accountId: body.accountId }) ||
+      promotee === undefined ||
+      !group.members.has(promotee.platformUserId)
+    ) {
       return reply.code(409).send({ code: 'NOT_MEMBER_YET', message: 'target member_joined has not arrived' });
     }
     group.promoted.add(promotee.platformUserId);

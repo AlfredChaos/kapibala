@@ -77,6 +77,11 @@ export interface LedgerFrame {
 export interface SwitchConfig {
   params?: Record<string, unknown>;
   target?: Record<string, unknown>;
+  /**
+   * 开关内部运行态（**非** arrange 输入）：如 gw-23 的剩余注入次数（按作用域）。
+   * 随配置对象一起被 scenario 覆盖 / clear 删除，故「重复 arm = 覆盖参数」天然把计数归零。
+   */
+  runtime?: Record<string, number>;
 }
 
 /** 验收断言真值来源（DES/14 §4 counters 行；增量接线随各域任务落地） */
