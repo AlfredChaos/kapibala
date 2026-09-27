@@ -41,6 +41,7 @@ import { execGetRecentMessages } from './tools/query.js';
 import { execFinish } from './tools/finish.js';
 import { execSendMessage, sendMessagePreAudit, recoverSendOutcome, type DeliveryWaiter } from './tools/send-message.js';
 import { execKickUser, kickPreAudit, recoverKickOutcome } from './tools/kick.js';
+import { agentCancelGate } from './cancel.js';
 import type { GatewayClient } from '../../gateway/client.js';
 
 
@@ -295,6 +296,16 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
           resultSummary: recovered.type === 'result' ? recovered.resultSummary : undefined,
         });
         continue;
+      }
+
+      // X-2 唯一取消检查点（§10 逐字）：每步循环开始前、发起本轮 turn 之前——
+      // turn_received 续推进与 tool_dispatched 补笔都不算「发起 turn」（当前步完整落库先行）。
+      if (pending?.status !== 'turn_received') {
+        const cancel = await tx(deps.pool, (c) => agentCancelGate(c, runId, run.group_id));
+        if (cancel.cancelled) {
+          if (cancel.nextRunId !== undefined) startAgentRun(cancel.nextRunId);
+          return;
+        }
       }
 
       if (pending?.status === 'turn_received') {
@@ -609,10 +620,14 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         if (end.nextRunId !== undefined) startAgentRun(end.nextRunId);
         return;
       }
-      // 正常 tool_result：与 step 完成同事务（§3 第 4 条）
+      // 正常 tool_result：与 step 完成同事务（§3 第 4 条）；
+      // errorCode 从 content 的 X-1 code 字段提取（§11：isError=true 时 errorCode 必填）
+      let errCodeFromContent: string | undefined;
+      try { const c = (JSON.parse(outcome.content) as { code?: string }).code; errCodeFromContent = typeof c === 'string' ? c : undefined; } catch { /* 非 JSON */ }
       await appendToolResult(runId, seq, tool.id, assistantBlock, {
         content: outcome.content,
         isError: outcome.isError ?? false,
+        errorCode: outcome.isError === true ? errCodeFromContent : undefined,
         resultSummary: outcome.resultSummary,
       });
     }
