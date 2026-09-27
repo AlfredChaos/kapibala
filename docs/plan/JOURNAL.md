@@ -346,11 +346,23 @@
 - 偏差与【解读】：① 卡 a)「抽 5 任务重跑」由并行独立 reviewer 会话执行（见下节占位）；② HANDOFF「DoD 达成」以四门绿 + git 干净为据，C2 需真 key、C3 e2e 竞态修补记录如实列出。
 - 踩坑：同坑二次出现升级 §5 规约——「跨包源导入 + rootDir 的 TS6059」已在 server AGENTS/本记录留档：`tsc -p tsconfig.test.json` 是检查面，`tsc`（build）是发射面，二者自此分离。
 
-### 抽查复审（T-P8-05 b 项，独立 reviewer 会话并行执行）
-<!-- 由主 agent 填入 reviewer 对 5 个已 DONE 任务的重跑验证 + 代码重读结论 -->
-- [ ] 待填：抽查名单（5 任务）
-- [ ] 待填：各任务 a) 验证命令重跑结果
-- [ ] 待填：代码重读（可读性/注释/SOLID）结论
+### 抽查复审（T-P8-05 b 项，独立 reviewer 会话 `review-final` 结论）
+
+**5/5 PASS。**
+
+| Task | Commit | Verdict | Evidence |
+|---|---|---|---|
+| T-P4-15 | 6211e03 | PASS | s5+s6 vitest 2/2 green; demo:s5 6 checks, demo:s6 5 checks PASS; counters-as-truth asserted |
+| T-P6-06 | 95bd185 | PASS | agent-run-page 5/5 green; verbatim fields incl. rawResponse <details>, errorCode+null, blocked alert; no any |
+| T-P7-03 | e527f12 | PASS | crash-recovery 14/14 (49.2s real kill -9); kick_target persisted in committed tx before gateway call; same-runId resume; sendCallsByClientMsgId=1 |
+| T-P8-01 | 877eccd | PASS | media 6/6; 30d default, traversal sanitize, 404→NULL+inconsistency once, running-run skip; fs unlink after COMMIT documented as safer C1 reading |
+| T-P2-12 | 9dca3fc | PASS | switches-timing 16/16; ≤1s/100-1500ms verbatim; gw-5 emit recipe not conflated with SSE replay (R-G) |
+
+非阻塞观察（reviewer 备注，不改判定）：
+- T-P4-15 的 dispatch label 写「lane-C scripted provider」实为 S5/S6 集成卡——mislabel，提交内容正确。
+- S5/crash-recovery 用 `{sent,SEND_TIMEOUT}` union 判定——合法非失败形态。
+- `/_test` 400 返回 `{message}` 非 server 错误信封——正确范围（mock 测试面）。
+- T-P7-03 的 mutation check 未重跑（需改仓文件，超出只读抽查范围）。
 
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架

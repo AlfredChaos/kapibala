@@ -71,5 +71,5 @@
 > - 四门终验：`pnpm lint` 0 错 · `pnpm typecheck` 5/5 包 Done · `pnpm build` 全 Done（web 271.52 kB）· `pnpm test` 全绿（contract 6 + mock-agent 57 + mock-gateway 120 + web 52 + server 434 = **669 tests**）。
 > - 任务：**73/73 卡全 DONE**（T-P8-05 统一勾选：逐卡比对 `git log` 提交主题——51 张历史遗留未翻状态的卡全部有对应提交，无一悬空；四命令全绿为行为证据）。
 > - 矩阵：VITEST_PLAN 125 行勾选完毕（T-P7-05 收口 22397f6）。
-> - 抽查复审：独立 reviewer 5 任务点检并行进行，结论回填 JOURNAL「抽查复审」节。
+> - 抽查复审：**5/5 PASS**（review-final 独立会话：T-P4-15/T-P6-06/T-P7-03/T-P8-01/T-P2-12 重跑验证+代码重读；4 条非阻塞观察见 JOURNAL）。
 > - git：84 提交、Conventional Commits、一提交一逻辑变更、工作区干净（仅 flake 修复/类型面提交均为单点变更）。
