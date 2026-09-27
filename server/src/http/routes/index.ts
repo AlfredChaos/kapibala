@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import type { GatewayClient } from '../../gateway/client.js';
 import { registerHealthRoutes } from './health.js';
 import { registerAccountRoutes } from './accounts.js';
+import { registerMessageRoutes } from './messages.js';
 
 export interface RouteDeps {
   pool: Pool;
@@ -17,4 +18,5 @@ export async function registerRoutes(app: App, deps: RouteDeps): Promise<void> {
   await registerHealthRoutes(app, deps);
   await registerAuthRoutes(app, deps);
   await registerAccountRoutes(app, deps);
+  await registerMessageRoutes(app, deps);
 }

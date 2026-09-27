@@ -145,7 +145,15 @@
 - 偏差与【解读】：① 外部消息 ON CONFLICT 判定用 RETURNING rowcount 而非预检——冲突吸收与触发在同一个原子写里，S2 的「不重复触发」没有竞态窗口。② own 检测按 §3 原文读 `account.platform_user_id`（服务账号集合真值，不缓存）；回流占位行的 account_id 就地写入（finalizeSent 合并时会迁移审计字段，不占位也能对应）。③ 畸形 payload → warn+skip：契约外形之外的数据是上游 bug，账本行照留、不进死信（与 account-status.ts 同收口）。④ ws_event(message) 的 own 帧带 deliveryStatus='sent'（§2.3 own 才携带），回流跳过零事件——不推「不变的更新」。
 - 踩坑：无。
 - VITEST 登记：A2-3/4、S-02/03（入站半边）、G-20 应勾——按 SP-6 规则登记于此。
+
 ---
+
+## 2026-09-28 T-P2-11 时间线游标分页（A4）
+- 做了什么：`server/src/modules/messages/timeline.ts`（encode/decodeCursor base64(sent_at_epoch_ms + '.' + sort_key)、sort_key 含 '.' 按首个分隔切；listTimeline：群存在先行 404、keyset `(sent_at,sort_key)<cursor` 复合比较、DESC 双键排序、limit+1 探测 nextCursor、字段 null 语义逐字 §5.3）+ `http/routes/messages.ts`（auth:'required'，querystring→模块装配）+ routes/index.ts 注册行。
+- 验证命令与输出摘录：**先红后绿**——测试先行（缺模块全红），实现后 `npx vitest run tests/messages/timeline-pagination.test.ts` → **7 passed**；全量 `npx vitest run` → **200 passed / 19 文件**（唯一红 = 兄弟 T-P3-05 半成品 create-group-job.test.ts ×6）；`npx tsc --noEmit` → 0 错；eslint clean。断言点：默认恰 50、同毫秒行按 sort_key DESC 定序（非到达序）、null 语义全字段、翻页间并发写入零重复零遗漏（fresh 行不越界进后页、3ms 补投行按序落在 page2）、own 消息 sentAt 上移后不在后页复现（§5.2a）、游标往返与脏输入 400、viewer 可读/未认证 401/未知群 404。
+- 偏差与【解读】：① limit 上限取 50（TIMELINE_PAGE_SIZE）——契约「limit=50」与 QR §1 视为默认即上限，超界按 400（agent get_recent_messages 同规则同上限）。② 非 uuid 形状的 :id 提前 404——避免 PG 22P02 掉成 500（控制台 API 的 groupId 是内部 uuid）。③ nextCursor 用 limit+1 探测：恰好满页时给末行游标（空页次轮返回），不足时 null——§5.1「不足 limit → null」的保守实现，nextCursor 存在则必有下一页的语义不倒置。
+- 踩坑：无。
+- VITEST 登记：A-12、A4-1、G-03（排序半边）应勾——按 SP-6 规则登记于此。
 
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
