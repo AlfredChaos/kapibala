@@ -23,6 +23,7 @@ const STATUS_BY_CODE: Readonly<Record<ApiErrorCode, number>> = {
   JOIN_TIMEOUT: 500, // QR §4 标注「job error」：不直接映射 HTTP，兜底 500
   TOOLS_INVALID: 400,
   JOB_NOT_FOUND: 404,
+  AGENT_RUN_NOT_FOUND: 404,
   GROUP_NOT_FOUND: 404,
   LEAVE_FAILED: 500,
   GROUP_UNREACHABLE: 502,
