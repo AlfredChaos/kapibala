@@ -8,6 +8,7 @@ import type { Pool } from 'pg';
 import { retryDeadLettersOnce } from '../events/deadletter.js';
 import { runAccountsRecoveryScan } from '../modules/accounts/transitions.js';
 import { runCreateGroupJob } from '../modules/groups/create-job.js';
+import { UNKNOWN_SETTLE_MS } from '../constants.js';
 import type { DispatchRegistry } from '../events/dispatch.js';
 import type { GatewayClient } from '../gateway/client.js';
 
@@ -25,6 +26,8 @@ export interface RecoveryDeps {
   readonly gateway: GatewayClient;
   /** 扫描 6 死信重放分发用（§1.4 重试 = 重放分发步骤 b)；与消费循环共用同一注册表） */
   readonly dispatch: DispatchRegistry;
+  /** 扫描 1：queued 未尝试行唤醒出站 dispatcher（T-P3-02/03）；缺省 = dispatch-wakeup 扫描 1s 内兜底 */
+  readonly wakeDispatcher?: (accountId: string) => void;
 }
 
 export interface RecoveryScan {
@@ -40,10 +43,28 @@ export const RECOVERY_SCANS: readonly RecoveryScan[] = [
     // queued 且 first_attempt_at IS NULL → 交给出站 dispatcher 正常首发（从未尝试，安全）；
     // queued 但尝试过（结果未知）→ 条件 UPDATE 转 unknown（unknown_since=now、deadline=now+5s，
     // E7 崩溃窗口收口，DES/05 §2.4）；unknown 行 → 交判定器（探测节奏从恢复时刻起算）。
-    // 【扩展点：出站管线 / unknown 判定器归属任务（DES/05 §2）】
+    // T-P3-03 已接线（des/10 §3 SWEEP1 逐字）：三步同一批 SELECT 驱动——
+    //   a) queued ∧ 未尝试 → wakeDispatcher（dispatcher 内 advisory lock 消化重复唤醒）；
+    //   b) queued ∧ 已尝试 → 转 unknown（条件更新守卫；幂等：重复跑无事）；
+    //   c) unknown → 判定器扫描（调度器 unknown-settle）自然接手，本扫描不重复处理。
     name: 'outbound-messages',
-    async run() {
-      return 0;
+    async run(deps) {
+      const { rows } = await deps.pool.query<{ account_id: string }>(
+        `SELECT DISTINCT account_id FROM message
+         WHERE delivery_status='queued' AND first_attempt_at IS NULL AND account_id IS NOT NULL`,
+      );
+      for (const row of rows) {
+        deps.wakeDispatcher?.(row.account_id);
+      }
+      const converted = await deps.pool.query(
+        `UPDATE message SET delivery_status='unknown',
+                            unknown_since=now(),
+                            unknown_deadline_at=now() + $1 * interval '1 millisecond',
+                            updated_at=now()
+         WHERE delivery_status='queued' AND first_attempt_at IS NOT NULL`,
+        [UNKNOWN_SETTLE_MS],
+      );
+      return rows.length + (converted.rowCount ?? 0);
     },
   },
   {

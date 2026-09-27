@@ -173,6 +173,15 @@
 - 踩坑：① **兄弟提交扫带未跟踪文件**：impl-a3 的 T-P3-06 commit (1778b09) 把我在 worktree 中未暂存的 index.ts dispatcher 接线一并提交，HEAD 树曾短暂悬空引用（commit 内 import → 未入库文件）；本次提交落库后恢复自洽。教训：并发 lane-A 下共享文件 index.ts 需 staged-only 习惯。② hashline 工具在密集同形段落（多个 `rows[0]`/`return`)易误锚——用「范围精确覆盖 + 不重述下界」规避。
 - VITEST 登记：A2-1/7/8/10、G-13/14、gw-15/16/17/10（测试侧）应勾——按 SP-6 规则登记于此。
 
+---
+
+## 2026-09-28 T-P3-03 unknown 判定器（5s 落定 / 2s 确认线 / 单次重发）
+- 做了什么：`modules/messages/adjudicator.ts`（createUnknownAdjudicator.sweep：扫 `delivery_status='unknown' AND unknown_deadline_at<=now()` → 逐行 pg_try_advisory_lock(clientMsgId) → by-client-id 判定表逐字分流：200→finalizeSent / 404 未过 2s 线→deadline+500ms 顺延再探 / 404 过线→resend_count=0 时 UPDATE 回 queued+resend_count=1+wakeDispatcher（重走 §2.1 全流程）/ resend_count=1 → failed(NETWORK_TIMEOUT) / 503·探测异常→保持 unknown 顺延 500ms）+ `modules/messages/finalize-sent.ts`（§4.3 唯一收口先行落库：预检→常规回填/乱序合并（先删占位再 UPDATE M 行+审计字段迁移）→序列步联动→ws_event；T-P3-04 的事件入口复用它）+ `scheduler/unknown-scan.ts`（注册行：1s tick 调 sweep）+ recovery/scans.ts 扫描1 落地（queued NULL→wakeDispatcher；queued 已尝试→转 unknown=5s deadline）+ index.ts 接线（wakeDispatcher 入 RecoveryDeps + unknown-settle 注册行）。
+- 验证命令与输出摘录：**先红后绿**——测试先行红（模块不存在），实现后 `npx vitest run tests/messages/unknown-adjudicator.test.ts` → **4/4**；scoped sweep（messages+constants+boot-order）→ 109 passed / 8 文件；全量 `vitest run` → 264/265（唯一红 = 兄弟 create-group-job.test.ts 偶发 fail：两次单独重跑均 6/6 绿——其 join 阶段对「202 延迟 + member_joined 时钟」有竞态假设，非我域）。断言点：gw-7 落地 → by-client-id 200 → finalizeSent sent+msgId 回填；gw-8 恒 404：未过 2s 线 sendCalls=0（A2「确认前不得重发」逐字）→ 过线后 resend_count=1+queued 交接 → 再 504 → unknown（deadline 重算）→ 再确认 → failed(NETWORK_TIMEOUT)；gw-9 503 期间行保持 unknown（since=2500 也绝不判未发出）→ 恢复后下一轮探测即定 sent；幂等 sweep 对已 sent 行吸收。
+- 偏差与【解读】：① finalizeSent 我先行落库（卡片归 T-P3-04，判定器 200 分支必需）；§4.3 全文实现并签名对齐 `finalizeSent(clientMsgId,msgId,sentAt,tx)`——兄弟 T-P3-04 已在其 commit（4e965c3）中连带入库本文件并对其 confirm.ts 建 handler，复用零摩擦。② resend 的 first_attempt_at 复位 NULL（而非 §2.4 图内联的"=now()"）——dispatcher 选择器认 NULL，发前由 claimAttempt 落新戳；E7 崩溃语义不变（已尝试且在途 → 恢复扫描转 unknown）。③ unknown_deadline_at 兼作探测调度字段（404/503 均顺延 500ms = PROBE_BACKOFF_MS 即探测节拍）——调度器 1s tick 是兜底不是节奏上限；判定逻辑读字段驱动。④ sweep LIMIT 100 批：积压超限时下 tick 续扫（真值在 DB）。⑤ by-client-id 探测异常（网络/TIMEOUT/INVALID_RESPONSE）同 503 对待——不推进判定，宁保守不误判。
+- 踩坑：① **兄弟二次扫带**：T-P3-04 commit (4e965c3) 把我 worktree 中未暂存的 finalize-sent.ts + index.ts 接线一并入库；HEAD 曾引用未跟踪的 unknown-scan.ts/adjudicator.ts，本次提交后自洽——并发 lane-A 的 index.ts/scans.ts 已两次被扫，commit 窗口需更紧或先 stash-push。② 测试回拨 unknown_since 时忘记同步 deadline（首轮 sweep 已顺延）→ 二轮 sweep 扫不到——修即绿；教训：回拨时间戳断言必须同时满足扫描谓词。
+- VITEST 登记：I2、I9、A2-2、G-17/18、gw-7/8/9（测试侧）应勾——按 SP-6 规则登记于此。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
