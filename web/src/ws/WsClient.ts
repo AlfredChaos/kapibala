@@ -258,7 +258,7 @@ export function createWsClient(deps: WsClientDeps): WsClient {
       return authed;
     },
     connect() {
-      if (connected || stopped) return;
+      if (connected) return; // 幂等；disconnect() 后可再 connect（stopped 由这里复位）
       connected = true;
       stopped = false;
       open();

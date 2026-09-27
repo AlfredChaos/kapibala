@@ -225,6 +225,14 @@
 - 踩坑：① hashline edit 连续锚错位（onmessage 块内 else 分支被截断拼接）——闭合括号密集段必须逐次回读；② disconnect 后 stale socket 的 onmessage 仍会触发（fake 是直推）——socket!==ws 守卫补上真实 socket「close 后不再投」语义；③ ESLint no-non-null-assertion 在测试文件同样生效——socketAt(i) 抛错助手替代 !。
 - VITEST 登记：B4-1（web 层 1+2）应勾——00-SPEC.md 矩阵行已登记（勾选状态阶段门维护）。
 
+
+## 2026-09-28 T-P5-03 A6 页面 2：账号列表页 + 转移面板
+- 做了什么：`web/src/lib/account-transitions.ts`（LEGAL_TRANSITIONS_WEB 纯数据镜像——15 条 A1 合法边，与 server transitions.ts 同构；CONNECT_FROM_WEB={idle,disconnected}；legalTargets/canConnect 纯函数）+ `components/TransitionPanel.tsx`（expectedFrom=打开面板时当前状态；to 只列 legalTargets——非法目标不出现在 UI，ILLEGAL_TRANSITION 留给并发；to='rate_limited' 必填 rateLimitedUntil（未来 ISO，datetime-local→toISOString()）否则提交禁用（D3-4 前端半边）；isValidFutureInstant 导出纯函数）+ `pages/AccountsPage.tsx`（行：状态徽标+platformUserId+rateLimitedUntil 倒计时（rateLimitCountdownText：「Ns 后恢复」/「已到期」，有 rate_limited 行才挂秒表）；REQ §4 三按钮——重连=connect 仅 CONNECT_FROM 可见、标记离线→disconnected、释放账号→suspended，各自由合法边控可见性；「调整状态…」开面板；expectedFrom=行当前态 CAS；成功重拉、失败（CAS_CONFLICT/ILLEGAL_TRANSITION）面板内 role=alert；WS account_status_changed/account_terminal→setAccounts 原地 patch 行徽标；viewer→写列整列不渲染）+ `router.tsx` /accounts 挂真页 + `useWsEvent.ts` +resetWsClient()（测试隔离缝）+ `WsClient.connect()` 修 bug：`stopped` 早退致 disconnect 后永远无法重连（login→logout→login 链断 WS）——connected 幂等闸、stopped 在 connect 内复位。
+- 验证命令与输出摘录：先红后绿——面板测试首次红（submitBtn.disabled 应 true 得 false：datetime-local 受控值要原生 setter+input 事件而非 .value+change）；修复后 `cd web && npx vitest run tests/accounts-page.test.tsx` → **8/8**：转移表同源（web 镜像===server LEGAL_TRANSITIONS 直接 import 对照 + CONNECT_FROM 一致）；online 目标集 ={idle,rate_limited,disconnected,suspended,session_expired}（无 online/自身；disconnected 目标无 online——connect 专属边不进面板）；rate_limited 缺时间→禁用、填 2099→解禁；行渲染（徽标/pu-1/30s 后恢复；重连仅 idle 行有、online/rl 行无）；viewer 无写列+无三按钮+直接 client.request transition→ApiError{403,FORBIDDEN}；WS seq=1 status_changed→徽标 online→disconnected、seq=2 terminal→suspended、重放 seq=1 不回退。全量 25/25；tsc/eslint/vite build 全绿。
+- 偏差与【解读】：① 「释放账号」映射 suspended 终态（REQ §4 三按钮与转移表对照——idle/suspended 之外无「释放」语义边，suspended 是所有非终态的合法终态目标）；② 「重连」按钮=connect 端点（非 transition——disconnected→online 是 connect 专属边不进表）；③ parity 对照用直接 import server 模块而非文本解析——transitions.ts 的运行时依赖（tx/pg）类型全 type-only，esbuild 剥离后纯数据，跨包 import 安全且最强保证；④ AccountsPage 的 viewer 403 断言走页面同一 ApiClient（双关：透传 ApiError 形状 + 服务端权威语义）。
+- 踩坑：① happy-dom + React 18 受控组件：select 用原生 value setter+change、input 用原生 setter+input——React 18 内部 tracker 不认直接 .value 赋值；② StrictMode 双挂载会创建两个 FakeSocket（cleanup 断第一个）——断言用 lastSocket()；③ hashline edit 又一次锚错位（viewer 测试开头被覆盖）——长多行 PUT 必须逐次回读。
+- VITEST 登记：A6（页面 2）应勾——00-SPEC.md 矩阵行已登记（勾选状态阶段门维护）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

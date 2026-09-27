@@ -23,6 +23,11 @@ export function initWsClient(deps: WsClientDeps): WsClient {
   return singleton;
 }
 
+/** 测试/重建缝：清空模块单例（测试间隔离——disconnect 后调用） */
+export function resetWsClient(): void {
+  singleton = null;
+}
+
 /** 取已装配的单例（未装配 = 无会话期：返回 null，订阅退化为空转） */
 export function getWsClient(): WsClient | null {
   return singleton;

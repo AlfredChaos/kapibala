@@ -4,20 +4,13 @@
 import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import { useAuth } from './auth/AuthProvider.js';
 import { LoginPage } from './pages/LoginPage.js';
+import { AccountsPage } from './pages/AccountsPage.js';
 
 /** 路由守卫：无会话 → /login（replace 防历史栈污染）。导出供守卫行为测试直挂 */
 export function RequireAuth(): JSX.Element {
   const { session } = useAuth();
   if (session === null) return <Navigate to="/login" replace />;
   return <Outlet />;
-}
-function AccountsPage(): JSX.Element {
-  return (
-    <main>
-      <h1>账号</h1>
-      <p>accounts list lands with T-P5-02</p>
-    </main>
-  );
 }
 
 const router = createBrowserRouter([

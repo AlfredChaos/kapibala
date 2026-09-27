@@ -715,7 +715,7 @@
   d) 不丢 lastSeq；无 any
   e) 矩阵 B4-1（前端半边）登记应勾
 
-### T-P5-03 账号列表页（页面 2）            [status: TODO]
+### T-P5-03 账号列表页（页面 2）            [status: DONE]
 - goal: 状态徽标、platformUserId、rateLimitedUntil 倒计时、connect 按钮（仅 idle/disconnected 可见）、transition 面板（expectedFrom=当前状态、to 只列合法目标、to='rate_limited' 必填 rateLimitedUntil）、viewer 隐藏写按钮。
 - refs: DES/15-web-console.md §2 页面 2；DES/03-account-module.md §1/§3；REQ §4 页面 2
 - owned: web/src/pages/AccountsPage.tsx、web/src/components/TransitionPanel.tsx、web/tests/accounts-page.test.tsx
