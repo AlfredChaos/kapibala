@@ -23,6 +23,7 @@ export const API_ERROR_CODES = [
   // 设计值（不在 QR §4 表内，设计文档补充）
   'JOB_NOT_FOUND',
   'AGENT_RUN_NOT_FOUND', // 404（T-P4-13 查询端点设计值，同 JOB_NOT_FOUND 先例）
+  'SEQUENCE_RUN_NOT_FOUND', // 404（T-P6-05 查询端点设计值）
   'LEAVE_FAILED',
   'GROUP_NOT_FOUND',
   'GROUP_UNREACHABLE',
