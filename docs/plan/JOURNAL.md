@@ -155,6 +155,15 @@
 - 踩坑：无。
 - VITEST 登记：A-12、A4-1、G-03（排序半边）应勾——按 SP-6 规则登记于此。
 
+---
+
+## 2026-09-28 T-P3-01 操作员 send 受理端点（§2.1.1 校验 + 先持久化后 202）
+- 做了什么：`server/src/modules/messages/accept.ts`（acceptOperatorMessage：text trim+≤TEXT_MAX_LENGTH → 群存在+非 left → 账号存在 → group_member 活跃行 → 状态守卫（仅 online/rate_limited 受理；rate_limited 照常受理 queued 到期放行）→ 单事务 INSERT queued + ws_event(message) → COMMIT 后 notifyWsEventCommitted + onAccepted 缝）+ `http/routes/groups-send.ts`（auth:'write'，body 装配，显式 reply.status(202)）+ routes/index.ts 注册行。
+- 验证命令与输出摘录：**先红后绿**——测试先行 6 红，实现后 `npx vitest run tests/messages/accept.test.ts` → **6 passed**；全量 `npx vitest run` → 208 passed / 18 文件（红的全部是兄弟 T-P3-05 WIP：migration.test.ts ×2 因其 009 迁移未落、create-group-job.test.ts ×1）；`npx tsc --noEmit` → 0 错；eslint clean。断言点：202 响应体 clientMsgId 服务端生成、响应落地后查库必有行（sent_at=受理时刻窗口内、source=operator、is_own、first_attempt_at NULL）、ws_event 同事务含 {groupId,msgId:null,isOwn,clientMsgId,deliveryStatus:'queued'}、text 空/空白/2001 字 400 且零行、边界 2000 字 202、群缺失 404 / left 409 / 非成员与 left 成员 409 / idle·disconnected·suspended·session_expired 全 409、rate_limited 与 unreachable 群均 202、viewer 403 / 匿名 401。
+- 偏差与【解读】：① left 群按 ACCOUNT_NOT_IN_GROUP 返回——REQ §2.3 send 行错误列只有 ACCOUNT_NOT_IN_GROUP/ACCOUNT_UNAVAILABLE 两个 409，GROUP_NOT_FOUND 语义是「群不存在」；left 后成员行终结，成员维度收口比群维度更贴近契约列。② 受理的事务内同时写 ws_event：DES/08 §2.3 的 message 帧来源含「出站受理」；queued 态 msgId 必 null（D3-3）、own 携带 clientMsgId/deliveryStatus。③ clientMsgId = `cm-<uuid4>` 服务端生成（卡片 d）；`notifyWsEventCommitted`（T-P2-10 缝）+ `onAccepted`（T-P3-02 dispatcher 缝）均为 COMMIT 后调用——提前调用会让 hub/dispatcher 读不到未提交行。④ 路径 :id 非 uuid 由 PG 22P02 兜底映射 GROUP_NOT_FOUND（与 timeline.ts 同策略）。
+- 踩坑：无。
+- VITEST 登记：A-09、G-16（受理半边）应勾——按 SP-6 规则登记于此。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
