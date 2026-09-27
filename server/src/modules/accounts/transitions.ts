@@ -1,14 +1,11 @@
-// 账号状态机（T-P2-05）：A1 转移表集中定义 + enterTerminal 幂等入口（薄版）+ accounts 恢复扫描。
-// 契约出处：REQ A1 转移表逐格（16 条合法边；表外含同态→同态一律 ILLEGAL_TRANSITION；
-// rateLimitedUntil 刷新不算转移；并发至多一个成功）；DES/03 §1（表、mermaid 逐字）、
-// §4（终态统一入口幂等三分支）、§5.3 + E10（accounts 恢复扫描两段）；QR §4（错误码）。
-// 终态副作用六动作（成员移除 / queued 取消 / 在途转 unknown / 步骤 skipped / ws_event 全量）
-// 归 T-P2-06 的本文件 enterTerminal 加宽——此处先落状态+terminal_at+两类 ws_event 的核心三写。
-import type { Pool, PoolClient } from 'pg';
+// 账号状态机（T-P2-05）：A1 转移表集中定义 + accounts 恢复扫描。
+// 契约出处：REQ A1 转移表逐格（API 表 15 条合法边——扣除 connect 专属 disconnected→online；
+// 表外含同态→同态一律 ILLEGAL_TRANSITION；rateLimitedUntil 刷新不算转移；并发至多一个成功）；
+// DES/03 §1（表、mermaid 逐字）、§5.3 + E10（accounts 恢复扫描两段）；QR §4（错误码）。
+// enterTerminal（终态入口 + 六动作副作用）在 terminal.ts（T-P2-06）。
+import type { Pool } from 'pg';
 import type { AccountStatus, AccountTerminalStatus } from '@kapibala/contract';
 import { tx } from '../../db/tx.js';
-import { AppError } from '../../http/plugins/errors.js';
-
 /** 账号状态值（= contract AccountStatus；模块内别名避免域内外类型名漂移） */
 export type AccountStatusValue = AccountStatus;
 
@@ -68,72 +65,14 @@ export function isLegalTransition(from: AccountStatusValue, to: AccountStatusVal
   return LEGAL_TRANSITIONS.has(`${from}->${to}`);
 }
 
+// enterTerminal（终态唯一入口 + 六动作副作用）已迁至 terminal.ts（T-P2-06）——
+// 本文件只留转移表 / 前置常量 / 恢复扫描。
 export interface AccountRow {
   id: string;
   status: AccountStatusValue;
   platform_user_id: string | null;
   rate_limited_until: Date | null;
   terminal_at: Date | null;
-}
-
-// ---------- enterTerminal 幂等入口（DES/03 §1 尾段 + §4 判定表） ----------
-
-export type TerminalOutcome =
-  /** 首次进入：条件 UPDATE 命中，副作用已随同事务 */
-  | 'entered'
-  /** rowcount=0 且已是同一终态 → 静默忽略（A1：不重放副作用） */
-  | 'already_same'
-  /** rowcount=0 且已是另一终态 → 终态间无转移边；事件路径吞掉并记日志（ILLEGAL 语义） */
-  | 'already_other'
-  /** rowcount=0 但当前是非终态且 ≠ expectedFrom（仅带 expectedFrom 的调用可命中）→ CAS_CONFLICT */
-  | 'conflict';
-
-export interface EnterTerminalOptions {
-  /** 操作员 transition 路径传入：把「当前状态不符」判为 CAS_CONFLICT（而非 already_*） */
-  expectedFrom?: AccountStatusValue;
-  /** 终态副作用扩展点（T-P2-06 六动作）：首次进入时同事务回调；默认空实现 */
-  onEntered?: (client: PoolClient, accountId: string, from: AccountStatusValue) => Promise<void>;
-}
-
-/**
- * 进入终态的统一入口（三来源汇聚：同步网关错误 / account_status 事件 / 操作员 transition）。
- * 单事务序列：SELECT ... FOR UPDATE（锁行、取转移前值）→ 幂等判定 → UPDATE →
- * ws_event 两帧（account_terminal + account_status_changed）→ onEntered 副作用回调。
- * 幂等三分支按 DES/03 §4 逐字；「后写不覆盖先写」由行锁 + expectedFrom 判定保证。
- */
-export async function enterTerminal(
-  client: PoolClient,
-  accountId: string,
-  target: AccountTerminalStatus,
-  options: EnterTerminalOptions = {},
-): Promise<{ outcome: TerminalOutcome; from?: AccountStatusValue }> {
-  // 先锁行读当前态：终态幂等分支与 CAS 判定都要用到「此刻真值」
-  const { rows } = await client.query<{ status: AccountStatusValue }>(
-    'SELECT status FROM account WHERE id = $1 FOR UPDATE',
-    [accountId],
-  );
-  const current = rows[0]?.status;
-  if (current === undefined) {
-    throw new AppError('ACCOUNT_NOT_FOUND', `unknown account: ${accountId}`);
-  }
-  if (isTerminal(current)) {
-    return { outcome: current === target ? 'already_same' : 'already_other', from: current };
-  }
-  if (options.expectedFrom !== undefined && current !== options.expectedFrom) {
-    return { outcome: 'conflict', from: current };
-  }
-  await client.query(
-    `UPDATE account SET status=$1, terminal_at=now(), updated_at=now() WHERE id=$2`,
-    [target, accountId],
-  );
-  await client.query("INSERT INTO ws_event (type, payload) VALUES ('account_terminal', $1::jsonb)", [
-    JSON.stringify({ accountId, status: target }),
-  ]);
-  await client.query("INSERT INTO ws_event (type, payload) VALUES ('account_status_changed', $1::jsonb)", [
-    JSON.stringify({ accountId, from: current, to: target }),
-  ]);
-  await options.onEntered?.(client, accountId, current);
-  return { outcome: 'entered', from: current };
 }
 
 // ---------- accounts 恢复扫描（DES/10 §3 第 5 扫；DES/03 §5.3 + E10） ----------

@@ -17,6 +17,7 @@ import { createPool } from './db/pool.js';
 import { ensureSchemaVersion } from './db/ensure-schema.js';
 import { startEventConsumer } from './events/consumer.js';
 import { createDispatchRegistry, type DispatchRegistry } from './events/dispatch.js';
+import { createAccountStatusHandler } from './events/handlers/account-status.js';
 import { createGatewayClient, type GatewayClient } from './gateway/client.js';
 import { createVerifyAccessToken } from './http/routes/auth.js';
 import { buildApp, type App } from './http/app.js';
@@ -110,6 +111,8 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   // 分发注册表为 boot 共享实例（T-P2-04）：消费循环的分发、死信重试的 b) 重放、
   // 后续领域任务（T-P2-06/08/09…）的 handler 注册，全部指向同一张表。
   const dispatch = options.dispatch ?? createDispatchRegistry();
+  // T-P2-06：account_status 事件 → enterTerminal（终态副作用；三来源之一）
+  dispatch.register('account_status', createAccountStatusHandler(logger));
 
   // 2. 恢复扫描：登记同步完成，扫描体异步交接（D3-2，不 await done）
   const recovery = startRecovery({

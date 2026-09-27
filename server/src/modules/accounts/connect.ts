@@ -8,7 +8,8 @@ import { tx } from '../../db/tx.js';
 import type { GatewayClient } from '../../gateway/client.js';
 import { GatewayError } from '../../gateway/errors.js';
 import { AppError } from '../../http/plugins/errors.js';
-import { enterTerminal, CONNECT_FROM, type AccountStatusValue } from './transitions.js';
+import { enterTerminal } from './terminal.js';
+import { CONNECT_FROM, type AccountStatusValue } from './transitions.js';
 
 export interface ConnectDeps {
   pool: Pool;

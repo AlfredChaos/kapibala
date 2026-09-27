@@ -17,7 +17,7 @@
 | I3 | 时间线无重复行；(groupId,msgId) 唯一；回流合并一行 | `tests/messages/finalize-sent.test.ts`（含乱序合并稳态断言，D1-3/D3-5） | ☐ |
 | I4 | 每群至多一个 running agent run / 序列 run | `tests/agent/trigger.test.ts`、`tests/sequences/start-mutex.test.ts`（S7） | ☐ |
 | I5 | 账号只沿转移表变化；终态无出边；CAS 后写不覆盖 | `tests/accounts/state-machine.test.ts`（并发 CAS 注入） | ☑ |
-| I6 | 终态副作用原子（全有或全无；含在途转 unknown，D1-2） | `tests/accounts/terminal-side-effects.test.ts`（事务中途回滚注入 + 在途竞态） | ☐ |
+| I6 | 终态副作用原子（全有或全无；含在途转 unknown，D1-2） | `tests/accounts/terminal-side-effects.test.ts`（事务中途回滚注入 + 在途竞态） | ☑ |
 | I7 | WS 事件对应已持久化状态（同事务） | `tests/ws/hub.test.ts`（崩溃后重放无「先事件后状态」） | ☐ |
 | I8 | 游标只推进连续前缀；停机事件恢复后全部处理 | `tests/events/cursor-prefix.test.ts` + `tests/events/resume.test.ts` | ☐ |
 | I9 | unknown 5s 落定；by-client-id 不可用期间保持、恢复后 2s 内定 | `tests/messages/unknown-adjudicator.test.ts`（开关 gw-9） | ☐ |
@@ -84,7 +84,7 @@
 | 修复项 | 回归断言 | 用例 | 状态 |
 |---|---|---|---|
 | D1-1 死信三写同事务 | 制造永久性业务写失败（孤儿群 FK）→ 死信事务成功、消费循环推进、账本有行 | `tests/events/dead-letter.test.ts` | ☐ |
-| D1-2 终态 × 在途发送 | send 在途时注入终态事件 → 行转 unknown 而非 cancelled；202 回写落 accepted；回流不产生第二行 | `tests/accounts/terminal-side-effects.test.ts` | ☐ |
+| D1-2 终态 × 在途发送 | send 在途时注入终态事件 → 行转 unknown 而非 cancelled；202 回写落 accepted（守卫放宽归 T-P3-02）；回流不产生第二行 | `tests/accounts/terminal-side-effects.test.ts` | ☑ |
 | D1-3 finalizeSent 合并 | 乱序窗口 message→message_sent / by-client-id 200 补投两路径 → 稳态恰一行、序列步骤联动 | `tests/messages/finalize-sent.test.ts` | ☐ |
 | D2-1 成员事件乱序 | left(E2) 先到 joined(E1) 后到 → 终态账号不复活；joined 在途终态 → 墓碑行；迟到 joined 在终态处理之后到达且 event_id > last_event_id → 不复活（STALE 处理）；墓碑行冲突时 last_event_id 单调推进（GREATEST，双 leave 循环不复活） | `tests/groups/member-projection.test.ts` | ☐ |
 | D2-2 ALREADY_MEMBER | gw-22 → 成员行 UPSERT、promote 后 role=admin、GET members 含该账号 | `tests/groups/create-group-job.test.ts` | ☐ |
@@ -129,3 +129,5 @@
 | A1-1 | 转移表 15 边（API 表 = REQ 网格扣除 connect 专属 disconnected→online） | `tests/accounts/state-machine.test.ts` | ☑ |
 | A1-2 | 终态无出边、重复进入幂等 | `tests/accounts/state-machine.test.ts`（终态无出边）+ `transition.test.ts`（重复 CAS_CONFLICT） | ☑ |
 | A1-4 | CAS 后写不覆盖 | `tests/accounts/transition.test.ts`（并发恰一成功） | ☑ |
+| A1-5 | 终态副作用原子（六动作单事务） | `tests/accounts/terminal-side-effects.test.ts` | ☑ |
+| G-04 | account_status + 自动移群 | `tests/accounts/terminal-side-effects.test.ts`（成员 left_at + handler 事件路径） | ☑ |

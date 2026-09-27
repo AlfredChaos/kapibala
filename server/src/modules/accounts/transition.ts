@@ -7,8 +7,8 @@ import type { Pool } from 'pg';
 import { tx } from '../../db/tx.js';
 import type { GatewayClient } from '../../gateway/client.js';
 import { AppError } from '../../http/plugins/errors.js';
+import { enterTerminal } from './terminal.js';
 import {
-  enterTerminal,
   isAccountStatus,
   isLegalTransition,
   isTerminal,
