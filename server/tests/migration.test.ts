@@ -59,8 +59,8 @@ describe('migration runner (A0)', () => {
         expect(err).toBeInstanceOf(SchemaVersionError);
         const sve = err as SchemaVersionError;
         expect(sve.kind).toBe('behind');
-        expect(sve.missing).toEqual([4, 5, 6, 7, 8]);
-        expect(sve.message).toContain('missing versions [4, 5, 6, 7, 8]');
+        expect(sve.missing).toEqual([4, 5, 6, 7, 8, 9]);
+        expect(sve.message).toContain('missing versions [4, 5, 6, 7, 8, 9]');
       });
     });
 
@@ -104,7 +104,7 @@ describe('migration runner (A0)', () => {
           );
           expect(outcome.code).toBe(1);
           const output = `${outcome.stdout ?? ''}\n${outcome.stderr ?? ''}`;
-          expect(output).toContain('missing versions [4, 5, 6, 7, 8]');
+          expect(output).toContain('missing versions [4, 5, 6, 7, 8, 9]');
         });
       },
     );

@@ -7,6 +7,8 @@ import type { GatewayClient } from '../../gateway/client.js';
 import { registerHealthRoutes } from './health.js';
 import { registerAccountRoutes } from './accounts.js';
 import { registerMessageRoutes } from './messages.js';
+import { registerGroupRoutes } from './groups.js';
+import { registerJobRoutes } from './jobs.js';
 import { registerGroupsSendRoutes } from './groups-send.js';
 
 export interface RouteDeps {
@@ -20,5 +22,7 @@ export async function registerRoutes(app: App, deps: RouteDeps): Promise<void> {
   await registerAuthRoutes(app, deps);
   await registerAccountRoutes(app, deps);
   await registerMessageRoutes(app, deps);
+  await registerGroupRoutes(app, deps);
+  await registerJobRoutes(app, deps);
   await registerGroupsSendRoutes(app, deps);
 }

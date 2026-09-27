@@ -4,6 +4,7 @@
 // member_left 无行建墓碑而非跳过；member_joined 的 INSERT/复活分支对称地先查 terminal_at
 // （R-A：终态账号永不复活为活跃成员）。外部成员（puid ∉ 服务账号集合）不建行（DES/04 §4 首段）。
 import type { PoolClient } from 'pg';
+import { markMemberJoinedInJobContext } from './create-job.js';
 
 /** 成员事件最小形状（投递层已确认 type；缺字段由 handler 层先拦） */
 export interface MemberEventInput {
@@ -81,6 +82,7 @@ export async function projectMemberJoined(client: PoolClient, ev: MemberEventInp
        ON CONFLICT (group_id, platform_user_id) DO NOTHING`,
       [groupId, account.id, ev.platformUserId, ev.eventId],
     );
+    if (!terminal) await markMemberJoinedInJobContext(client, groupId, account.id);
     return;
   }
   if (row.left_at !== null) {
@@ -98,6 +100,7 @@ export async function projectMemberJoined(client: PoolClient, ev: MemberEventInp
        WHERE id = $1`,
       [row.id, ev.eventId],
     );
+    await markMemberJoinedInJobContext(client, groupId, account.id);
     return;
   }
   // R1 活跃行：幂等跳过（S2 重复推送吸收），仅 last_event_id 单调推进
@@ -105,6 +108,7 @@ export async function projectMemberJoined(client: PoolClient, ev: MemberEventInp
     'UPDATE group_member SET last_event_id = GREATEST(last_event_id, $2) WHERE id = $1',
     [row.id, ev.eventId],
   );
+  await markMemberJoinedInJobContext(client, groupId, account.id);
 }
 
 /**
