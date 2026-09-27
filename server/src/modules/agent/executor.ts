@@ -37,6 +37,8 @@ import {
   recordProtocolErrorStep,
 } from './protocol-errors.js';
 import { startAgentRun } from './trigger.js';
+import { execGetRecentMessages } from './tools/query.js';
+import { execFinish } from './tools/finish.js';
 
 
 
@@ -57,6 +59,8 @@ export type ToolOutcome =
     }
   | {
       readonly type: 'end_run';
+      /** finish 等结束步的 step.kind（§7.4 'final'）；缺省 'tool_use' */
+      readonly stepKind?: 'final';
       readonly status: 'finished' | 'failed' | 'blocked' | 'cancelled';
       readonly endReason: 'final' | 'budget_exhausted' | 'wall_clock' | 'protocol_errors' | 'audit_blocked' | 'cancelled';
       readonly summary?: string;
@@ -440,27 +444,25 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
       }
 
       if (tool.name === 'finish') {
-        const input = tool.input as Record<string, unknown> | undefined;
-        const summary = typeof input?.['summary'] === 'string' ? input['summary'] : '';
+        // §7.4 逐字：step kind='final'、result_summary='ok'、run finished/final、summary=input.summary
+        const outcome = execFinish(tool.input);
         const end = await tx(deps.pool, async (client) => {
           await client.query(
-            `UPDATE agent_run_step SET kind='final', status='done', result_summary='ok',
+            `UPDATE agent_run_step SET kind='final', status='done', result_summary=$4,
                     appended_blocks=$3::jsonb, updated_at=now()
              WHERE run_id=$1 AND seq=$2`,
-            [runId, seq, JSON.stringify(assistantBlock)],
+            [runId, seq, JSON.stringify(assistantBlock), outcome.resultSummary ?? 'ok'],
           );
-          return endAgentRun(client, { runId, status: 'finished', endReason: 'final', summary });
+          return endAgentRun(client, { runId, status: 'finished', endReason: 'final', summary: outcome.summary });
         });
         if (end.nextRunId !== undefined) startAgentRun(end.nextRunId);
         return;
       }
 
-      const toolExec = deps.executeTool;
-      const outcome = toolExec !== undefined
-        ? await tx(deps.pool, (c) =>
-            toolExec({ client: c, runId, groupId: run.group_id, stepSeq: seq, toolName: tool.name, input: tool.input }),
-          )
-        : { type: 'result' as const, content: JSON.stringify({ code: 'UNKNOWN_TOOL', message: 'tool executor not wired' }), isError: true };
+      const toolExec = deps.executeTool ?? defaultToolExecutor;
+      const outcome = await tx(deps.pool, (c) =>
+        toolExec({ client: c, runId, groupId: run.group_id, stepSeq: seq, toolName: tool.name, input: tool.input }),
+      );
 
       if (outcome.type === 'end_run') {
         const end = await tx(deps.pool, async (client) => {
@@ -468,10 +470,10 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
             ? [...assistantBlock, { role: 'user', content: [{ type: 'tool_result', tool_use_id: tool.id, content: outcome.toolResult.content, is_error: outcome.toolResult.isError ?? false }] }]
             : assistantBlock;
           await client.query(
-            `UPDATE agent_run_step SET status='done', appended_blocks=$3::jsonb,
+            `UPDATE agent_run_step SET status='done', kind=$5, appended_blocks=$3::jsonb,
                     result_summary=$4, updated_at=now()
              WHERE run_id=$1 AND seq=$2`,
-            [runId, seq, JSON.stringify(blocks), outcome.resultSummary ?? null],
+            [runId, seq, JSON.stringify(blocks), outcome.resultSummary ?? null, outcome.stepKind ?? 'tool_use'],
           );
           return endAgentRun(client, {
             runId,
@@ -529,3 +531,15 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
 }
 
 const MAX_RESULT_SUMMARY_CHARS = 200; // resultSummary ≤200 字（REQ §2.3 行）
+
+/** 缺省工具分发：get_recent_messages 实装（T-P4-08）；send_message/kick_user 归 T-P4-09/10 */
+const defaultToolExecutor: ToolExecutor = async (ctx) => {
+  if (ctx.toolName === 'get_recent_messages') {
+    return execGetRecentMessages(ctx.client, { groupId: ctx.groupId, input: ctx.input });
+  }
+  return {
+    type: 'result',
+    content: JSON.stringify({ code: 'UNKNOWN_TOOL', message: `tool not wired: ${ctx.toolName}` }),
+    isError: true,
+  };
+};
