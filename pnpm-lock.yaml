@@ -74,6 +74,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      mock-agent:
+        specifier: workspace:*
+        version: link:../mock-agent
       mock-gateway:
         specifier: workspace:*
         version: link:../mock-gateway

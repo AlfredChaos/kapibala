@@ -182,6 +182,15 @@
 - 踩坑：① **兄弟二次扫带**：T-P3-04 commit (4e965c3) 把我 worktree 中未暂存的 finalize-sent.ts + index.ts 接线一并入库；HEAD 曾引用未跟踪的 unknown-scan.ts/adjudicator.ts，本次提交后自洽——并发 lane-A 的 index.ts/scans.ts 已两次被扫，commit 窗口需更紧或先 stash-push。② 测试回拨 unknown_since 时忘记同步 deadline（首轮 sweep 已顺延）→ 二轮 sweep 扫不到——修即绿；教训：回拨时间戳断言必须同时满足扫描谓词。
 - VITEST 登记：I2、I9、A2-2、G-17/18、gw-7/8/9（测试侧）应勾——按 SP-6 规则登记于此。
 
+---
+
+## 2026-09-28 T-P3-11 S1–S4 场景用例 + demo 脚本（串行汇合点）
+- 做了什么：`tests/helpers/env.ts`（startScenarioEnv：真 PG 测试库（模板克隆）→ seed → in-process mock-gateway + mock-agent listen → boot() 全管线 → admin token；+ REST/开关/counters/emit/时间线/建群封装，测试与 demo 共用）+ `tests/scenarios/{s1,s2,s3,s4}.test.ts` + `scripts/demo/{s1,s2,s3,s4}.ts`（与用例同编排，逐条 ✓ 断言 + `PASS sN — checks=N, counters={快照}` 摘要）。server devDeps +mock-agent（env.ts 裸导需要）。
+- 验证命令与输出摘录：先红——env 未落时四文件全红（登录 401，boot 不含 seed——CLI 职责）；实现后 `npx vitest run tests/scenarios/` → **4/4**（~11s）；`pnpm demo:s1`→PASS checks=10、`s2`→PASS checks=6、`s3`→PASS checks=7、`s4`→PASS checks=28（18 个窗口内探测点 sendCalls 恒=1）。全量 `vitest run` → 296–298/299 绿，残余红全是兄弟域既有 flake：`create-group-job` 主链（HEAD 即偶发 fail，~66% 率，与「member_joined 时钟+202 延迟」竞态强相关）与一次 `ws/hub` backpressure（孤立重跑 2/2 绿）。
+- 偏差与【解读】：① `GET /api/accounts` 只有列表端点——getAccount 走列表 find；`GET /api/groups/:id/messages` limit 上限 50（TIMELINE_PAGE_SIZE）→ 封装钉 50。② **S4 rate_limit 开关需先 clear 再看窗口**：武装态命中规则即永拒（「期内再 send 复 429」对开关命中而言）；窗口存续靠 mock 侧已记 rateLimitedUntil——正是「窗口独立于开关存在」的契约语义，用例先注册 429 → clear → 观察冻结窗口。③ S4 硬门断言基线=1：mock 在路由入口即计 sendCalls（429 那下也算），零试探=计数冻结而非恒 0。④ 时间线 ORDER BY sent_at DESC——「按原顺序」断言为索引 i2<i1。⑤ demo 复用测试库基建（kapibala_test_<rand>，结束 DROP）而非 dev 库——可重复、零环境污染。
+- 踩坑：① boot() **不做** seed——seed 是独立 CLI 职责；env 缺 seed → 401（先红来源）。② content-type=json + 空 body 被 Fastify 400——connect POST 必须带 `{}`。③ job 响应契约只有 {status,errors}，group_id 需库读。④ mock rate_limit 开关武装=永拒（窗口仅在 clear 后由 rateLimitedUntil 承继）——编排顺序必须是 注册→clear→观察。⑤ hashline 工具在本卡密集同形段（多 `.filter(`/`await timeline`）多次误锚；编辑顺序断言时曾吞掉 m2 send 行——每次边界警告都必须回读验证。
+- VITEST 登记：S1、S2、S3、S4、gw-1/2/3/6（场景侧）应勾——按 SP-6 规则登记于此。阶段门 P3：demo:s1–s4 现场 PASS（checks=10/6/7/28）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
