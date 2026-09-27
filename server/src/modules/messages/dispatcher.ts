@@ -33,6 +33,7 @@ import { checkRateLimit, registerRateLimit } from '../accounts/rate-limit.js';
 import { applyGroupUnreachableCascade } from '../groups/state.js';
 import { enterTerminal } from '../accounts/terminal.js';
 import { notifyWsEventCommitted } from '../../ws/notify.js';
+import { checkCrashPoint } from '../../crash.js';
 import type { AccountTerminalStatus } from '@kapibala/contract';
 
 /** 最小日志面（与 consumer/scheduler 同构；测试可 fake） */
@@ -204,7 +205,7 @@ export function startOutboundDispatcher(options: OutboundDispatcherOptions): Out
                             unknown_since=now(),
                             unknown_deadline_at=now() + $2 * interval '1 millisecond',
                             updated_at=now()
-         WHERE id=$1 AND delivery_status='queued'`,
+         WHERE id=$1 AND delivery_status='queued' AND first_attempt_at IS NULL`,
         [msg.id, UNKNOWN_SETTLE_MS],
       );
       if (rowCount === 1) {
@@ -220,7 +221,7 @@ export function startOutboundDispatcher(options: OutboundDispatcherOptions): Out
       // 复位先于登记提交：任一失败都不留下「尝试过但未发」的假阳性（A2：429 = 确认未发出）
       await client.query(
         `UPDATE message SET first_attempt_at=NULL, updated_at=now()
-         WHERE id=$1 AND delivery_status='queued'`,
+         WHERE id=$1 AND delivery_status='queued' AND first_attempt_at IS NULL`,
         [msg.id],
       );
     });
@@ -341,7 +342,9 @@ export function startOutboundDispatcher(options: OutboundDispatcherOptions): Out
             throw err;
           }
           // E7/I1：先于 send 落 first_attempt_at（崩溃 → 恢复扫描转 unknown，不盲发）
+          checkCrashPoint('dispatcher.claim.before'); // T-P7-02：窗口「first_attempt_at 落库前」
           if (!(await claimAttempt(msg))) continue;
+          checkCrashPoint('dispatcher.claim.after'); // T-P7-02：窗口「落库后、网关 send 前」
           const group = await pool.query<{ gateway_group_id: string | null }>(
             'SELECT gateway_group_id FROM "group" WHERE id=$1',
             [msg.group_id],

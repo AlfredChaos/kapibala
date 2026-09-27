@@ -53,7 +53,7 @@ export async function withCrashPoint(
     new Promise<null>((resolve) => setTimeout(() => resolve(null), 20_000)),
   ]);
   if (code !== CRASH_EXIT_CODE) {
-    throw new Error(`expected crash exit code ${CRASH_EXIT_CODE}, got ${String(code)} (point=${name})`);
+    throw new Error(`expected crash exit code ${CRASH_EXIT_CODE}, got ${String(code)} (point=${name}, fnError=${String(fnError)})`);
   }
   return fnError;
 }

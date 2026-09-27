@@ -14,8 +14,8 @@
 
 | # | 不变量（简述） | 用例文件 | 状态 |
 |---|---|---|---|
-| I1 | 网关已发出的每条我方消息 DB 必有记录 | `tests/crash/crash-consistency.test.ts`（崩溃点 ①） | ☐ |
-| I2 | 一条出站记录至多一条网关消息（重发 ≤1 且先确认未发出） | `tests/messages/unknown-adjudicator.test.ts`（开关 gw-7/8）+ crash ① | ☐ |
+| I1 | 网关已发出的每条我方消息 DB 必有记录 | `tests/crash/crash-consistency.test.ts`（崩溃点 ①） | ☑（crash 半边，T-P7-02）
+| I2 | 一条出站记录至多一条网关消息（重发 ≤1 且先确认未发出） | `tests/messages/unknown-adjudicator.test.ts`（开关 gw-7/8）+ crash ① | ☑（crash 半边，T-P7-02）
 | I3 | 时间线无重复行；(groupId,msgId) 唯一；回流合并一行 | `tests/messages/finalize-sent.test.ts`（含乱序合并稳态断言，D1-3/D3-5） | ☐ |
 | I4 | 每群至多一个 running agent run / 序列 run | `tests/agent/trigger.test.ts`、`tests/sequences/start-mutex.test.ts`（S7） | ☐ |
 | I5 | 账号只沿转移表变化；终态无出边；CAS 后写不覆盖 | `tests/accounts/state-machine.test.ts`（并发 CAS 注入） | ☑ |
@@ -76,7 +76,7 @@
 
 | 崩溃点 | 注入位置 | 用例 | 状态 |
 |---|---|---|---|
-| ① queued 未发（first_attempt_at 落库前/后） | dispatcher 事务边界 | `tests/crash/crash-consistency.test.ts` | ☐ |
+| ① queued 未发（first_attempt_at 落库前/后） | dispatcher 事务边界 | `tests/crash/crash-consistency.test.ts` | ☑（T-P7-02）
 | ② turn 已发未收（turn_dispatched） | turn HTTP 前后 | `tests/agent/crash-recovery.test.ts` | ☐ |
 | ③ tool_dispatched（send/kick 效果未知） | 工具执行前后 | `tests/agent/crash-recovery.test.ts` | ☐ |
 | ④ 序列排期中（链头已排期/在途） | 排期事务边界 | `tests/sequences/restart-reschedule.test.ts` | ☐ |
