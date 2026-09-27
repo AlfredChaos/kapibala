@@ -1,6 +1,7 @@
 // 事务助手（T-P0-04）：BEGIN / COMMIT / ROLLBACK 一处收口，回调拿到的 client 即事务载体。
 // 宪法 §3-1（先持久化后外部效果）依赖精确事务边界——所有多写原子路径必须走这里，禁止手拼 BEGIN。
 import type { Pool, PoolClient } from 'pg';
+import { checkCrashPoint } from '../crash.js';
 
 export async function tx<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
@@ -8,7 +9,9 @@ export async function tx<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>):
   try {
     await client.query('BEGIN');
     const result = await fn(client);
+    checkCrashPoint('tx.commit.before'); // T-P7-01：崩溃点「提交前」——回滚语义窗口
     await client.query('COMMIT');
+    checkCrashPoint('tx.commit.after'); // T-P7-01：崩溃点「提交后」——已持久化、后续动作丢失
     return result;
   } catch (err) {
     try {

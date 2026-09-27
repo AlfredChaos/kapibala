@@ -17,6 +17,7 @@ import { registerSequenceRoutes } from './sequences.js';
 import { registerSequenceRunRoutes } from './sequence-runs.js';
 import { registerSequenceRunQueryRoutes } from './sequence-run-query.js';
 
+import { registerCrashControlRoute } from './crash.js';
 export interface RouteDeps {
   pool: Pool;
   /** T-P2-05 起账号域 connect/transition 需要（connect 先调网关；disconnect 补偿调用） */
@@ -39,4 +40,5 @@ export async function registerRoutes(app: App, deps: RouteDeps): Promise<void> {
   await registerSequenceRoutes(app, deps);
   await registerSequenceRunRoutes(app, deps);
   await registerSequenceRunQueryRoutes(app, deps);
+  await registerCrashControlRoute(app); // T-P7-01：CRASH_CONTROL=1 才装配，否则 no-op
 }

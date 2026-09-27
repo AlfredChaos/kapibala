@@ -10,6 +10,7 @@ import {
   SEND_TIMEOUT_BUDGET_MS,
 } from '../constants.js';
 import { codeFromStatus, GatewayError, GatewayTimeoutError, isNamedGatewayCode } from './errors.js';
+import { checkCrashPoint } from '../crash.js';
 
 export interface GatewayTimeouts {
   default: number;
@@ -105,12 +106,17 @@ async function request<T>(
   // 预算覆盖整次调用（T-P2-01 review #1）：teardown 统一放在最外层 finally——
   // 头部到达后 body 吊死同样被 AbortController 掐断，不再逃逸端点预算。
   try {
+    checkCrashPoint(`gateway.call.${endpoint}.before`); // T-P7-01：「外部调用前」窗口
+    checkCrashPoint('gateway.call.before');
     const response = await fetch(`${baseUrl}${path}`, {
       method: init.method,
       headers: init.body === undefined ? undefined : { 'content-type': 'application/json' },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: controller.signal,
     });
+
+    checkCrashPoint(`gateway.call.${endpoint}.after`); // T-P7-01：「外部调用后」（响应已收）
+    checkCrashPoint('gateway.call.after');
 
     if (!response.ok) {
       // 错误 body 是 best-effort：读取被超时掐断/失败时退化为 null——状态码已知，

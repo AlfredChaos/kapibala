@@ -6,6 +6,8 @@
 // 错误语义（§4 流程图逐字）：HTTP 非 2xx / 非合法 JSON（含 markdown 围栏、前后夹文）/ 形状不符
 // → BAD_JSON；网络失败或超时 → TURN_TIMEOUT。两类都经 AgentClientError.protocolErrorCode 透出，
 // executor 原样写协议错误步（raw_response ≤2KB 截断也留调用方——本层原样透传原始体）。
+
+import { checkCrashPoint } from '../crash.js';
 // ---------- /agent/turn ----------
 
 export interface AgentTurnToolDef {
@@ -116,12 +118,16 @@ async function postJson(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    checkCrashPoint(`agent.call.${path.replace(/^\//, '').replaceAll('/', '_')}.before`); // T-P7-01
+    checkCrashPoint('agent.call.before');
     const res = await deps.fetchImpl(`${deps.baseUrl}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+    checkCrashPoint(`agent.call.${path.replace(/^\//, '').replaceAll('/', '_')}.after`); // T-P7-01
+    checkCrashPoint('agent.call.after');
     return { status: res.status, raw: await res.text() };
   } catch (err) {
     // abort → TURN_TIMEOUT；连接拒绝/DNS 等同样归 TURN_TIMEOUT 语义（「响应未按时到达」）

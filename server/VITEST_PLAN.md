@@ -8,6 +8,8 @@
 
 `tests/helpers/crash.ts`：`withCrashPoint(name, fn)`——在事务提交前后、外部调用前后可注入 `process.exit(9)`；测试以子进程起 server、杀进程、重启后断言 DB 状态与 mock counters。
 
+状态：✅ 已落地（T-P7-01）——`tests/helpers/crash.ts`（`withCrashPoint`/`assertPostCrashHealth`）+ `tests/helpers/server-process.ts`（子进程装配：随机端口/独立库/in-process mock）+ `tests/crash/_setup.test.ts`（自检：exit 9、@N 命中、tx.commit 前后窗口、用例间库与 mock 隔离）。
+
 ## 1. 不变量 I1–I14 → 用例
 
 | # | 不变量（简述） | 用例文件 | 状态 |
