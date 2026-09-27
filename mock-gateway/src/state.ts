@@ -75,6 +75,10 @@ export interface GatewayCounters {
   /** S8：0 */
   landedMessages: number;
   kickCalls: number;
+  /**
+   * 账本帧产出数（appendLedger 计一次）。**不计投递次数**：gw-3 双推是投递层复制同一帧，
+   * 账本仍一行、eventId 不重复分配（DES/14 §5 行 3「推两次」≠ 造两条事件）。
+   */
   framesEmitted: number;
 }
 

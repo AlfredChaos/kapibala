@@ -7,6 +7,7 @@ import { registerMediaRoutes } from './media.js';
 import { registerMessagingRoutes } from './messaging.js';
 import { registerTestPlane } from './test-plane.js';
 import { createGatewayState, DEFAULT_SEED_ACCOUNTS, type GatewayState } from './state.js';
+import { createBasicFrameExpander } from './switches/basic.js';
 
 /** Fastify 实例 + 状态句柄（测试与后续域模块直接读状态/账本） */
 export type GatewayApp = FastifyInstance & { gatewayState: GatewayState };
@@ -39,8 +40,8 @@ export function createGatewayApp(options: GatewayAppOptions = {}): GatewayApp {
 
   registerAccountRoutes(app, state);
   registerTestPlane(app, state);
-  // SSE 推送器（T-P1-02；最小 wiring 适配：路由注册必须在工厂内落地）
-  registerSseRoutes(app, state);
+  // SSE 推送器（T-P1-02）+ 投递修饰 seam（T-P1-05：gw-3 双推；gw-4 乱序在 T-P2-12 接入同一 seam）
+  registerSseRoutes(app, state, { createFrameExpander: () => createBasicFrameExpander(state) });
   registerGroupRoutes(app, state); // T-P1-03（最小 wiring 适配）
   registerMessagingRoutes(app, state); // T-P1-04（最小 wiring 适配）
   registerMediaRoutes(app); // T-P1-04（最小 wiring 适配）

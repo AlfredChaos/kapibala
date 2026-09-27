@@ -1,17 +1,24 @@
 // SSE 推送器（T-P1-02；REQ §2.1 事件流节；DES/14 §1/§3）。
 // 语义：带 since → 回放账本（eventId > since，独占）再续推实时帧；不带 since → 从当前时刻开始。
 // 帧 = `id: <eventId>` / `event: <type>` / `data: <JSON>`（data 内带 eventId 与 type，REQ §2.1）。
-// 乱序 / 重复推送（开关 3/4）不在本任务：decorateFrame 是留好的 seam——
-// 开关层插在「账本落定 → socket 写出」之间（DES/14 §3 推送器修饰投递模型）。
+// 投递修饰（DES/14 §3「推送器按开关修饰后投递」）走 createFrameExpander seam：开关层插在
+// 「水位过滤之后、socket 写出之前」——gw-3 双推（T-P1-05）、gw-4 相邻乱序（T-P2-12）共用此口。
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { framesSince, subscribeLedger } from './ledger.js';
 import type { GatewayState, LedgerFrame } from './state.js';
 
-/** 投帧装饰 seam：默认恒等；dup_push_all / reorder_1s 等开关层（T-P1-05/T-P2-12）在此插入 */
-export type FrameDecorator = (frame: LedgerFrame) => LedgerFrame;
+/**
+ * 投帧展开 seam：一条账本帧 → 0..n 条待写帧。每连接一个实例（可自带缓冲状态）。
+ * - 恒等 `[frame]`；gw-3 `dup_push_all` → `[frame, frame]`（同 eventId 投两次，账本仍一行）
+ * - gw-4 `reorder_1s`（T-P2-12）→ 首帧缓冲返回 `[]`、次帧返回 `[新, 旧]`（相邻交换）
+ * 展开点在水位过滤**之后**，故延迟/乱序产出的较小 eventId 不会被 `eventId > lastSentEventId` 丢掉；
+ * 水位取「已写 eventId 的单调最大值」，先写大 id 再写小 id 也不会让水位回退而放行重复帧。
+ */
+export type FrameExpander = (frame: LedgerFrame) => LedgerFrame[];
 
 export interface SseOptions {
-  decorateFrame?: FrameDecorator;
+  /** 每连接调用一次（各连接的缓冲与水位互不串扰）；缺省恒等展开 */
+  createFrameExpander?: () => FrameExpander;
 }
 
 /** SSE keepalive 注释行间隔（mock 内部传输选择，非契约数字；防代理空闲断连） */
@@ -23,7 +30,7 @@ export function frameToWire(frame: LedgerFrame): string {
 }
 
 export function registerSseRoutes(app: FastifyInstance, state: GatewayState, options: SseOptions = {}): void {
-  const decorate = options.decorateFrame ?? ((frame: LedgerFrame) => frame);
+  const createExpander = options.createFrameExpander ?? ((): FrameExpander => (frame) => [frame]);
 
   app.get('/events', { config: { rawBody: false } }, async (request, reply) => {
     // since 非法值显式 400：静默当 0 处理会变成「全量回放」，与调用方意图相反
@@ -36,7 +43,7 @@ export function registerSseRoutes(app: FastifyInstance, state: GatewayState, opt
       since = Number(query.since);
     }
 
-    return handleEventsStream(request, reply, state, since, decorate);
+    return handleEventsStream(request, reply, state, since, createExpander);
   });
 }
 
@@ -45,9 +52,10 @@ async function handleEventsStream(
   reply: FastifyReply,
   state: GatewayState,
   since: number | undefined,
-  decorate: FrameDecorator,
+  createExpander: () => FrameExpander,
 ): Promise<void> {
   reply.hijack();
+  const expand = createExpander();
   const raw = reply.raw;
   raw.writeHead(200, {
     'content-type': 'text/event-stream',
@@ -60,14 +68,18 @@ async function handleEventsStream(
   let closed = false;
   const pending: LedgerFrame[] = [];
   let live = false;
-  // 水位：回放段已发到的 eventId（衔接去重）。无 since 时无回放，水位 0 = 实时帧全放行。
+  // 水位：已写出的最大 eventId（回放段与实时段的衔接去重）。无 since 时无回放，水位 0 = 实时帧全放行。
   let lastSentEventId = since ?? 0;
   const writeFrame = (frame: LedgerFrame): void => {
     if (closed) {
       return;
     }
-    raw.write(frameToWire(decorate(frame)));
-    lastSentEventId = frame.eventId;
+    for (const delivered of expand(frame)) {
+      raw.write(frameToWire(delivered));
+      if (delivered.eventId > lastSentEventId) {
+        lastSentEventId = delivered.eventId;
+      }
+    }
   };
 
   // 1) 先挂订阅（回放期间新到的帧进 pending，不丢）

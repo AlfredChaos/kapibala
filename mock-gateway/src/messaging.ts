@@ -5,23 +5,15 @@ import type { FastifyInstance } from 'fastify';
 import { assertAccountOperationAllowed, type AccountGateError } from './accounts.js';
 import { appendLedger, type GatewayState, type MockMessageRecord } from './state.js';
 import { activeSwitch, readBooleanParam, readNumberParam, readStringParam } from './switches.js';
+import { randomBetween, resolveMessageSentDelayMs, resolveSendAcceptDelayMs } from './switches/basic.js';
 
 // —— 契约时序（QR §1 / REQ §2.1）；mock 自持（不依赖 server 的 constants.ts）——
-/** send 的 202 本身可能 1–2s（REQ §2.1） */
-const SEND_ACCEPT_MIN_MS = 1000;
-const SEND_ACCEPT_MAX_MS = 2000;
-/** message_sent 通常 50–2000ms 后到达（REQ §2.1；QR §1） */
-const MESSAGE_SENT_MIN_MS = 50;
-const MESSAGE_SENT_MAX_MS = 2000;
+// send 202（gw-1）与 message_sent（gw-2）的钉值/区间解析归 switches/basic.ts（T-P1-05）。
 /** kick 响应可能 1–5s（REQ §2.1；QR §1） */
 const KICK_LATENCY_MIN_MS = 1000;
 const KICK_LATENCY_MAX_MS = 5000;
 /** send_504_land_1500 的固定落地时延（DES/14 §3：S5 编排为 1.5s；契约 2s 内落地） */
 const SEND504_LAND_MS = 1500;
-
-function randomBetween(min: number, max: number): number {
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
 
 function sendGateError(reply: { code: (s: number) => { send: (b: unknown) => unknown } }, gate: AccountGateError) {
   reply.code(gate.statusCode).send(gate.body);
@@ -109,15 +101,11 @@ export function registerMessagingRoutes(app: FastifyInstance, state: GatewayStat
       return reply.code(403).send({ code: 'SENDER_NOT_IN_GROUP', message: 'sender is not in this group' });
     }
 
-    // 受理：202 本身可能 1–2s（钉值或区间随机）；message_sent 在 202 之后再计时
-    const acceptDelay =
-      readNumberParam(activeSwitch(state, 'send_accept_slow', sendTarget), 'delayMs') ??
-      randomBetween(SEND_ACCEPT_MIN_MS, SEND_ACCEPT_MAX_MS);
+    // 受理：202 本身可能 1–2s（gw-1 钉值或区间随机）；message_sent 在 202 之后再计时（gw-2）
+    const acceptDelay = resolveSendAcceptDelayMs(state, sendTarget);
     const senderPuid = account.platformUserId;
     const failureCode = readStringParam(activeSwitch(state, 'message_failed_event', sendTarget), 'code');
-    const landDelay =
-      readNumberParam(activeSwitch(state, 'message_sent_delay', sendTarget), 'delayMs') ??
-      randomBetween(MESSAGE_SENT_MIN_MS, MESSAGE_SENT_MAX_MS);
+    const landDelay = resolveMessageSentDelayMs(state, sendTarget);
     // 两段独立计时（DES/14 §3）：先 await 慢回 202（占住请求），落地在 202 后 landDelay
     await waitMs(acceptDelay);
     reply.code(202).send({ accepted: true });

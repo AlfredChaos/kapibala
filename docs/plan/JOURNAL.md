@@ -101,6 +101,12 @@
 - 偏差与【解读】：派发卡文案曾出现契约中不存在的字段/开关名（编排层漂移）；实现以契约为准，**按 REQ §2.1 正确**，未带入代码。
 - 踩坑：无。
 
+## 2026-09-27 T-P1-05 S1/S2 驱动开关（gw-1/2/3）与 counters 断言
+- 做了什么：`mock-gateway/src/switches/basic.ts` 落地三开关语义（开关名逐字取自 DES/14 §5 表）：gw-1 `send_accept_slow` / gw-2 `message_sent_delay` 的钉值解析 + 契约区间常量（1–2s / 50–2000ms）自 `messaging.ts` 收拢为单一归宿；gw-3 `dup_push_all` 的投帧展开器（每帧投递两次，同 eventId）。**扩缝**（T-P1-02 审查 advisory 的收口）：`src/sse.ts` 的 `decorateFrame(frame)=>LedgerFrame`（1→1，表达不了双推/乱序）改为 `createFrameExpander: () => (frame)=>LedgerFrame[]`——每连接一实例（可自带缓冲），展开点位于**水位过滤之后**，水位改为「已写 eventId 的单调最大值」，故延迟/乱序产出的较小 eventId 不再被 `eventId > lastSentEventId` 丢弃；`?since=` 独占回放语义未动。`src/app.ts` 接线、`src/state.ts` 补 `framesEmitted` 语义注释（计账本产出、不计投递次数）。新增 `mock-gateway/tests/switches-basic.test.ts`（8 用例）。
+- 验证命令与输出摘录：**先红后绿**——前任 worker 留下的 6 用例全红（双推未实现 → 收帧超时 5s；`(await app.inject(...).json())` 优先级笔误 → TypeError），修正笔误并实现后 `pnpm -F mock-gateway test` → **68 passed**（原 60 + 新 8）、`pnpm -F mock-gateway typecheck` → 0 错、`npx eslint mock-gateway/src mock-gateway/tests` → clean。**变异抽查**（改后已还原、复跑全绿）：① 双推改单推 → 3 条双推用例红；② 水位过滤挪到展开之后 → seam 乱序自检用例红（eventId 1 被丢）+ 双推红；③ 钉值解析改恒随机 → gw-1/gw-2/覆盖参数/counters 4 条红。**真实进程冒烟**（`PORT=4178 pnpm exec tsx src/index.ts` + curl）：gw-1 钉 1500ms → 202 的 `time_total` = **1.502s**；gw-2 钉 400ms → SSE 依次收 `message_sent`(id 1) 与回流 `message`(id 2)；`GET /_test/counters` = `{sendCallsByAccount:{acc-01:1},sendCallsByClientMsgId:{c-smoke:1},landedMessages:1,kickCalls:0,framesEmitted:2}`；:4177 的 gw-3 冒烟 = 同一帧（id/data 逐字节相同）投递两次而 `framesEmitted=1`、账本一行。
+- 偏差与【解读】：① gw-1/gw-2 的钉值读取在 T-P1-04 已内联于 `messaging.ts`，本任务按卡面 owned 收拢进 `switches/basic.ts`（行为逐位不变）；② counters 用例把「同 clientMsgId 两次 send（不同账号）」与「群不存在 → 404 的 send」一并纳入断言，证明计数计的是**调用尝试**而非成功（S4「限流期内 sendCallsByAccount=0」的语义基础），故 `framesEmitted=7`——前任 worker 草稿写 4 与其自身注释（列了 5 项）不符，按实测真值改正；③ 钉值断言的上界一律取**契约区间之外**（gw-1 改钉 300ms < 下沿 1000ms、覆盖用例钉 0ms < message_sent 下沿 50ms），钉值被忽略时随机延迟必落区间内 → 用例变红（假绿防线）。**应勾行（VITEST_PLAN，阶段门统一勾选）**：§3.1 gw-1/2 与 gw-3 行的落地侧 `mock-gateway/tests/switches-basic.test.ts`；§2 S1/S2 行的开关驱动侧已就绪（场景用例本体归 T-P3-11/T-P4-15）。gw-4 `reorder_1s` 在 T-P2-12 直接接入同一 seam（本任务已用「相邻交换」最小实现自检该接入点）。
+- 踩坑：SSE 投递修饰插在 1→1 的 `decorateFrame` 里既表达不出双推、也表达不出乱序；而把展开结果**再过一次水位**会同时丢掉「同 eventId 的第二份」与「乱序后的旧帧」——seam 必须位于水位过滤之后且水位单调不回退（`src/sse.ts` 注释 + `tests/switches-basic.test.ts` 的 seam 自检用例守住）。
+
 ---
 
 <!-- 后续任务条目按上述格式在此追加。示例：
