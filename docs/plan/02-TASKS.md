@@ -823,7 +823,7 @@
   d) 时间 ISO 8601 UTC、无值 null；无 any
   e) VITEST 行 A-17 登记应勾
 
-### T-P6-06 页面 4：Agent run 详情            [status: TODO]
+### T-P6-06 页面 4：Agent run 详情            [status: DONE]
 - goal: `/agent-runs/:id` 页面：steps 时间线（kind/工具名/input/resultSummary/isError+errorCode/auditVerdict/rawResponse 折叠）、协议错误步 errorCode 展示、endReason 徽标、blocked/failed 醒目。
 - refs: DES/15-web-console.md §2 页面 4；REQ §4 页面 4、B4-2
 - owned: web/src/pages/AgentRunPage.tsx、web/src/components/StepList.tsx、web/tests/agent-run-page.test.tsx

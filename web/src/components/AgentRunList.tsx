@@ -3,6 +3,7 @@
 // 本组件只渲染列表 + 行级标红；「顶部横幅」由 GroupDetailPage 在有 blocked run 时渲染
 // （横幅是页面级警示，不是列表行级装饰）。无视觉打磨（卡片 d 负面清单）——标红用
 // data-blocked 标记 + 最小内联样式，A6 断言锚点。
+import { Link } from 'react-router-dom';
 import type { AgentRunView } from '../lib/api-types.js';
 
 export interface AgentRunListProps {
@@ -30,7 +31,7 @@ export function AgentRunList(props: AgentRunListProps): JSX.Element {
               borderLeft: blocked ? '4px solid #c00' : undefined,
             }}
           >
-            <strong>{run.id}</strong>
+            <Link to={`/agent-runs/${run.id}`}><strong>{run.id}</strong></Link>
             <span style={{ marginLeft: '0.5rem' }}>{run.status}</span>
             {run.endReason !== null && (
               <span style={{ marginLeft: '0.5rem', color: blocked ? '#c00' : '#555' }}>

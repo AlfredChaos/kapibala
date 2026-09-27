@@ -46,3 +46,21 @@ export interface TimelinePage {
   readonly items: TimelineItem[];
   readonly nextCursor: string | null;
 }
+
+/** GET /api/agent-runs/:id 步行（DES/06 §7 + server query.ts AgentRunStepView 逐字） */
+export interface AgentRunStepView {
+  readonly seq: number;
+  readonly kind: string; // tool_use | protocol_error | final
+  readonly toolUseId: string | null;
+  readonly name: string | null;
+  readonly input: unknown;
+  readonly resultSummary: string | null;
+  readonly isError: boolean;
+  readonly errorCode: string | null;
+  readonly auditVerdict: string | null;
+  readonly rawResponse: string | null; // ≤2KB 已由后端截断——直接渲染
+}
+
+export interface AgentRunDetailView extends AgentRunView {
+  readonly steps: AgentRunStepView[];
+}

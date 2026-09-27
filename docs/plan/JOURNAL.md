@@ -249,6 +249,14 @@
 - 踩坑：① **跨包 import server 源做 parity 有运行时陷阱**：transitions.ts → db/tx.js → crash.js（兄弟 WIP）会把整条服务端模块图拉进 web typecheck/运行——改为文本抽取源文件字面边表（范围收窄到 LEGAL_TRANSITIONS 块内，CONNECT_FROM 单列数组不被误吃；抽取集非空兜底断言防空表误绿）；② React 18 StrictMode 双调不只 updater——纯 mount effect 也双跑，桩 client 的 includes 匹配顺序（'before=' 必须先于 'messages'）要按特异度排序；③ tests 无 AuthProvider 时 WS 单例不会自己 connect——测试里显式 connect。
 - VITEST 登记：A4-1（web 前端半边）应勾——00-SPEC.md 矩阵行已登记（勾选状态阶段门维护）。
 
+
+## 2026-09-28 T-P6-06 页面 4：Agent run 详情
+- 做了什么：`web/src/components/StepList.tsx`（steps 时间线：seq/kind/name/input(JSON 文本，null→「—」)/resultSummary/isError+errorCode/auditVerdict/rawResponse `<details>` 折叠——后端已 ≤2KB 截断直接渲染；protocol_error 或 errorCode 非空 → 红左边条+红底行）+ `pages/AgentRunPage.tsx`（GET /api/agent-runs/:id；WS agent_run 且 runId 匹配：终态（finished/failed/blocked/cancelled）→ 重拉详情拿全量 steps、非终态（running）→ 只更新头部 status 不重拉；blocked/failed → role=alert 顶部醒目 banner 含 endReason；endReason 徽标）+ `router.tsx`（/agent-runs/:id 挂进 AuthProvider 包裹受保护路由）+ `AgentRunList` 行 id 包 `<Link>`（页面 3 最近 run 列表入口逐字）+ `api-types.ts`（AgentRunStepView/AgentRunDetailView）。
+- 验证命令与输出摘录：`npx vitest run tests/agent-run-page.test.tsx` → **5/5**：全字段渲染（kind/name/input/resultSummary/auditVerdict/rawResponse details）；协议错误步 errorCode=BAD_JSON+`toolUseId=null`/`input=—` null 字面量呈现+rawResponse 内容可读；blocked→alert banner+endReason 徽标；WS 终态重拉（finished 后 step-4 出现、其他 runId 帧不重拉、running 帧不重拉）；AgentRunList 行链接 `/agent-runs/run-1`。全量 47/47；tsc/eslint/build 全绿。
+- 偏差与【解读】：① 「toolUseId/name/input 为 null 的呈现」落地为 `toolUseId=null`/`input=—` 字面量（比空列更可断言）；② input 对象一律 JSON.stringify 单行展示（不递归美化）；③ running 帧只更新 status——卡片 b 只要求「终态重拉」；④ AgentRunList 链用 `<Link>`（MemoryRouter 测试环境下断言 href）。
+- 踩坑：**StrictMode 双 effect 让「按调用序号切假响应」的 fetch 桩失效**（首次 mount 会连拉两次详情，第二条响应被提前消费）→ 响应体改由可变变量控制，调用计数只用于「是否重拉」断言（baseCalls 差值）；WS 终态/他 run 帧断言都用差值不变性。
+- VITEST 登记：B4-2 应勾（00-SPEC.md 已登记）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
