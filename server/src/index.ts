@@ -15,6 +15,7 @@ import type { AppConfig } from './config/index.js';
 import { ConfigError, loadConfig } from './config/index.js';
 import { createPool } from './db/pool.js';
 import { ensureSchemaVersion } from './db/ensure-schema.js';
+import { startEventConsumer } from './events/consumer.js';
 import { createGatewayClient, type GatewayClient } from './gateway/client.js';
 import { createVerifyAccessToken } from './http/routes/auth.js';
 import { buildApp, type App } from './http/app.js';
@@ -23,7 +24,7 @@ import type { RecoveryScan } from './recovery/scans.js';
 import { createScheduler, type Scheduler } from './scheduler/index.js';
 import { createScanRegistry, type ScanRegistry } from './scheduler/registry.js';
 
-// ---------- SSE 消费 seam（T-P2-03 接线点） ----------
+// ---------- SSE 消费 seam（T-P2-03 已接线：缺省 = events/consumer.ts 的真实消费循环） ----------
 
 export interface EventConsumer {
   /** 优雅关停：断开 SSE 连接并停止重连循环（游标已持久化，重启后 since 补拉） */
@@ -38,7 +39,7 @@ export interface EventConsumerDeps {
 }
 
 /**
- * T-P2-03 落地时把真实消费循环从这里接入（boot 缺省值换成 events/ 的工厂即可，无需重排启动时序）。
+ * 缺省实现 = events/consumer.ts 的 startEventConsumer（T-P2-03 接线；测试注入缝不变）。
  * 契约：调用即「异步启动」——允许返回 pending 的 Promise，boot 不 await 它就绪（D3-2）。
  */
 export type StartEventConsumer = (deps: EventConsumerDeps) => EventConsumer | Promise<EventConsumer>;
@@ -52,7 +53,7 @@ export interface BootOptions {
   logger?: Logger;
   /** 测试注入缝：仪表化恢复扫描；缺省 RECOVERY_SCANS 六扫描骨架 */
   recoveryScans?: readonly RecoveryScan[];
-  /** 测试注入缝 / T-P2-03 接线点：缺省 no-op consumer（骨架期无消费循环） */
+  /** 测试注入缝：缺省 events/consumer.ts 的真实消费循环（全局单飞 + 连续前缀游标 + 退避重连） */
   startConsumer?: StartEventConsumer;
   /** 各域扫描的注册表；缺省空表（后续任务经 handle.registry 或 boot 前注册） */
   registry?: ScanRegistry;
@@ -102,11 +103,13 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   //    启动失败记 error（不静默）；句柄 Promise 保留给 stop() 与调用方。
   const startConsumer: StartEventConsumer =
     options.startConsumer ??
-    (() => {
-      // 骨架期缺省：no-op（T-P2-03 接入真实消费循环后此缺省值随接线移除）
-      logger.info('events consumer seam: no-op until T-P2-03 lands the consumer loop');
-      return { stop: async () => {} };
-    });
+    ((deps) =>
+      // T-P2-03 接线：消费循环只需要 pool / gatewayUrl / logger（分发注册表与死信缝走 events/ 缺省）
+      startEventConsumer({
+        pool: deps.pool,
+        gatewayUrl: deps.config.gatewayUrl,
+        logger: deps.logger,
+      }));
   logger.info('starting events consumer');
   const consumer: Promise<EventConsumer> = (async () =>
     startConsumer({ pool, config, logger, gateway }))();

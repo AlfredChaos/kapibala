@@ -208,7 +208,8 @@ describe('boot order (T-P2-02)', () => {
   });
 
   it('default seams: boot with no injections reaches listen, health 200, stops cleanly', async () => {
-    // 生产缺省路径（main() 同形）：RECOVERY_SCANS 六 stub + no-op consumer + 空调度注册表
+    // 生产缺省路径（main() 同形）：RECOVERY_SCANS 六 stub + 真实消费循环（T-P2-03 接线；测试期
+    // :4100 无网关 → 连接失败进退避重连，silent 日志下无副作用，stop() 释放单飞锁后干净退出）+ 空调度注册表
     const port = await freePort();
     const handle = await boot({ config: testConfig(port), logger: pino({ level: 'silent' }) });
     const health = await fetch(`http://127.0.0.1:${port}/api/health`);
