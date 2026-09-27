@@ -136,6 +136,15 @@
 - 偏差与【解读】：① 竞态分支用「SELECT FOR UPDATE + 条件 UPDATE」两步实现 §5.1 的 rowcount=0 语义——行锁保证守卫与转移前值判定同一快照，比裸 UPDATE RETURNING 更贴「只允许两态写限流字段」的逐字语义。② 到期扫描与 T-P2-05 的 boot 恢复扫描（runAccountsRecoveryScan §a）共用同一条条件 UPDATE 语义：boot 段收「进程停了错过到期」的补转，本扫描是常驻节拍的常态路径；不重提 transitions.ts 以免撞兄弟正在编辑的终端副作用六动作。③ wakeDispatcher 为可选缝：T-P3-02 dispatcher 未落地，恢复转移本身照常发生，queued 消息由 dispatcher 轮询拾取（DB 为真值）。
 - 踩坑：无新坑（竞态守卫沿用 enterTerminal 的 SELECT FOR UPDATE 先例）。
 - VITEST 登记：D2-5、A1-3/7、G-15 应勾——按 SP-6 规则登记于此。
+
+---
+
+## 2026-09-28 T-P2-08 入站 message 投影 + isOwn 合并 + agent 触发入口
+- 做了什么：`server/src/modules/messages/inbound.ts`（§3 管线：网关 groupId → group.gateway_group_id 映射 → own 检测 account.platform_user_id EXISTS → 外部 INSERT is_own=false/delivery_status=NULL 或回流占位 is_own=true/delivery_status='sent'/client_msg_id=NULL，全走 ON CONFLICT (group_id,msg_id) 部分唯一索引吸收，RETURNING 区分插入/冲突；新插发 ws_event(message)）+ `modules/agent/trigger-entry.ts`（§4.4 判定收口：守卫 active+agent_enabled → INSERT agent_run ON CONFLICT 单飞行索引 DO NOTHING + ws_event(agent_run) → 冲突则 agent_trigger_queue ON CONFLICT；trigger_context 按 REQ §2.2 形状含 ownPlatformUserIds/policy/triggerMessages）+ `events/handlers/message.ts`（payload 契约外形收窄 → projectInboundMessage；畸形 warn+skip 不进死信）+ index.ts 注册。dispatch.ts 骨架注释的属卡勘误（message→T-P2-08、member_*→T-P2-09、sent/failed→T-P3-04）。
+- 验证命令与输出摘录：**先红后绿**——测试先行（缺模块全红），实现后 `npx vitest run tests/messages/inbound.test.ts` → **7 passed**；连带 `tests/events/ + rate-limit + boot-order` 共 **40 passed**；eslint clean；tsc 对本卡文件 0 错（兄弟 T-P2-06/09 半成品文件的 TS2307 与已注释字段无关）。断言点：外部落行字段全形（is_own/delivery_status/client_msg_id/account_id/media_url）、ws_event 仅 own 携带 clientMsgId/deliveryStatus、trigger_context 逐字段含 ownPlatformUserIds、重推三场景零重复（行/事件/run/队列）、回流两种命中形态、守卫不过零 run 零积压、映射缺失零副作用。
+- 偏差与【解读】：① 外部消息 ON CONFLICT 判定用 RETURNING rowcount 而非预检——冲突吸收与触发在同一个原子写里，S2 的「不重复触发」没有竞态窗口。② own 检测按 §3 原文读 `account.platform_user_id`（服务账号集合真值，不缓存）；回流占位行的 account_id 就地写入（finalizeSent 合并时会迁移审计字段，不占位也能对应）。③ 畸形 payload → warn+skip：契约外形之外的数据是上游 bug，账本行照留、不进死信（与 account-status.ts 同收口）。④ ws_event(message) 的 own 帧带 deliveryStatus='sent'（§2.3 own 才携带），回流跳过零事件——不推「不变的更新」。
+- 踩坑：无。
+- VITEST 登记：A2-3/4、S-02/03（入站半边）、G-20 应勾——按 SP-6 规则登记于此。
 ---
 
 <!-- 后续任务条目按上述格式在此追加。示例：

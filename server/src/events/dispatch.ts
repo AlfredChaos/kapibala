@@ -41,8 +41,8 @@ export function createDispatchRegistry(): DispatchRegistry {
   const handlers = new Map<string, EventHandler>();
   for (const type of GATEWAY_EVENT_TYPES) {
     // 骨架 stub：领域处理器按类型在后续任务落地并经 register() 替换——
-    // message / message_sent / message_failed → T-P2-06（DES/05 §3、§2.5）；
-    // member_joined / member_left → T-P2-08（DES/04 §4）；account_status → T-P2-09（DES/03 §4）。
+    // message → T-P2-08（DES/05 §3）；message_sent / message_failed → T-P3-04（finalizeSent §4.3）；
+    // member_joined / member_left → T-P2-09（DES/04 §4）；account_status → T-P2-06（DES/03 §4）。
     handlers.set(type, async () => {});
   }
   return {

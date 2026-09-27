@@ -18,6 +18,8 @@ import { ensureSchemaVersion } from './db/ensure-schema.js';
 import { startEventConsumer } from './events/consumer.js';
 import { createDispatchRegistry, type DispatchRegistry } from './events/dispatch.js';
 import { createAccountStatusHandler } from './events/handlers/account-status.js';
+import { createMessageHandler } from './events/handlers/message.js';
+import { createMemberHandler } from './events/handlers/member.js';
 import { createGatewayClient, type GatewayClient } from './gateway/client.js';
 import { createVerifyAccessToken } from './http/routes/auth.js';
 import { buildApp, type App } from './http/app.js';
@@ -113,6 +115,12 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   const dispatch = options.dispatch ?? createDispatchRegistry();
   // T-P2-06：account_status 事件 → enterTerminal（终态副作用；三来源之一）
   dispatch.register('account_status', createAccountStatusHandler(logger));
+  // T-P2-08：message 事件 → 入站投影（去重/回流合并/agent 触发入口）
+  dispatch.register('message', createMessageHandler());
+  // T-P2-09：member_joined / member_left 事件 → 成员投影（墓碑/单调防线/R-A 终态）
+  const memberHandler = createMemberHandler(logger);
+  dispatch.register('member_joined', memberHandler);
+  dispatch.register('member_left', memberHandler);
 
   // 2. 恢复扫描：登记同步完成，扫描体异步交接（D3-2，不 await done）
   const recovery = startRecovery({
