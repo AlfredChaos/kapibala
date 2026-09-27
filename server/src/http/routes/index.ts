@@ -14,6 +14,7 @@ import { registerLeaveAllRoutes } from './groups-leave-all.js';
 import { registerGroupStateRoutes } from './groups-patch.js';
 import { registerAgentRunRoutes } from './agent-runs.js';
 import { registerSequenceRoutes } from './sequences.js';
+import { registerSequenceRunRoutes } from './sequence-runs.js';
 
 export interface RouteDeps {
   pool: Pool;
@@ -35,4 +36,5 @@ export async function registerRoutes(app: App, deps: RouteDeps): Promise<void> {
   await registerGroupStateRoutes(app, deps);
   await registerAgentRunRoutes(app, deps);
   await registerSequenceRoutes(app, deps);
+  await registerSequenceRunRoutes(app, deps);
 }
