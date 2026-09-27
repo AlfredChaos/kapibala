@@ -167,11 +167,11 @@ describe('continuous-prefix cursor (T-P2-03)', () => {
         }
       });
       const deadLetters: Array<{ eventId: number; message: string }> = [];
-      const deadLetter: DeadLetterHandler = async (event, err) => {
-        // 死信三写事务（D1-1）归 T-P2-04——此处只验证接线点收到事件与错误
+      const deadLetter: DeadLetterHandler = async (ctx) => {
+        // 死信三写事务实现归 T-P2-04（deadletter.ts）——此处只验证接线点收到事件与错误
         deadLetters.push({
-          eventId: event.eventId,
-          message: err instanceof Error ? err.message : String(err),
+          eventId: ctx.event.eventId,
+          message: ctx.error instanceof Error ? ctx.error.message : String(ctx.error),
         });
       };
       const { logger, entries } = captureLogger();

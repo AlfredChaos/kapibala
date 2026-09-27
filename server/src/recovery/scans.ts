@@ -5,11 +5,14 @@
 // 插入时保持本清单顺序不变（boot-order.test.ts 钉死名单与次序）。
 // 宪法 §3-5：扫描体必须全部条件更新、可重复触发（幂等吸收）——本骨架不含任何进程内正确性判定。
 import type { Pool } from 'pg';
+import { retryDeadLettersOnce } from '../events/deadletter.js';
+import type { DispatchRegistry } from '../events/dispatch.js';
 import type { GatewayClient } from '../gateway/client.js';
 
-/** 最小日志面（只用 info/error）：pino Logger 结构兼容，测试可用普通对象 fake */
+/** 最小日志面（info/warn/error）：pino Logger 结构兼容，测试可用普通对象 fake */
 export interface RecoveryLogger {
   info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
   error(obj: unknown, msg?: string): void;
 }
 
@@ -18,6 +21,8 @@ export interface RecoveryDeps {
   readonly logger: RecoveryLogger;
   /** 扫描 5b「补调 disconnect」用（E10 收口）；client 自身不做业务决策（T-P2-01） */
   readonly gateway: GatewayClient;
+  /** 扫描 6 死信重放分发用（§1.4 重试 = 重放分发步骤 b)；与消费循环共用同一注册表） */
+  readonly dispatch: DispatchRegistry;
 }
 
 export interface RecoveryScan {
@@ -78,12 +83,12 @@ export const RECOVERY_SCANS: readonly RecoveryScan[] = [
     },
   },
   {
-    // 扫描 6：pending_event 死信立即重试一轮（status='pending' AND next_retry_at<=now()）；
-    // 常态 5s 周期重试归调度器扫描（DES/08 §1.4）。
-    // 【扩展点：T-P2-04（死信三写事务 + 重试）】
+    // 扫描 6：pending_event 死信立即重试一轮（status='pending' AND next_retry_at<=now()）——
+    // T-P2-04 已接线：与调度器 5s 周期扫描共用同一实现（重放分发 + done/退避/stuck 告警）；
+    // 常态周期重试的节流归调度器侧扫描（§1.4），恢复扫描永远立即跑一轮（DES/10 §3 逐字）。
     name: 'pending-events',
-    async run() {
-      return 0;
+    async run(deps) {
+      return retryDeadLettersOnce({ pool: deps.pool, registry: deps.dispatch, logger: deps.logger });
     },
   },
 ];

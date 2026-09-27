@@ -6,7 +6,7 @@
 // - cursor=0（首次部署）→ 不带 since 从当前时刻开始（§1.1 解读 #11：此前历史与我方无关）；
 // - 退避 500ms 起 ×2 上限 5s（DES/08 §1.1，常量出处 constants.ts）；收到任何帧即重置；
 // - 消费循环绝不因单事件失败中断（A2）：事务失败 → 账本/游标都没动，重连后 since 补拉必重投；
-//   死信三写事务（D1-1，§1.2 DL 分支）归 T-P2-04——本文件只暴露 deadLetter 接线点；
+//   死信三写事务（D1-1，§1.2 DL 分支）已落地于 deadletter.ts——deadLetter 缝缺省接线该实现；
 // - boot 不等就绪（D3-2）：startEventConsumer 同步返回句柄，循环在后台跑。
 import type { Pool, PoolClient } from 'pg';
 import { SSE_RECONNECT_BACKOFF_MAX_MS, SSE_RECONNECT_BACKOFF_START_MS } from '../constants.js';
@@ -15,11 +15,17 @@ import { isRecord } from '../gateway/client.js';
 import { subscribeEvents, type SseFrame } from '../gateway/sse.js';
 import { loadCursorTracker, readCursor, type CursorTracker } from './cursor.js';
 import {
+  createDeadLetterHandler,
+  insertInconsistency,
+  type DeadLetterHandler,
+} from './deadletter.js';
+import {
   createDispatchRegistry,
   dispatchEvent,
   type DispatchRegistry,
   type GatewayEventEnvelope,
 } from './dispatch.js';
+import { classifyOrphan, OrphanWindowedError } from './orphan.js';
 
 /** 全局单飞锁键（DES/08 §1.1 逐字）：会话级 advisory lock，多实例部署只有一个消费者 */
 const LOCK_KEY = 'events:consumer';
@@ -36,11 +42,9 @@ export interface EventConsumer {
   stop(): Promise<void>;
 }
 
-/**
- * T-P2-04 接线点：事件事务失败后的死信收口（§1.2 DL 三写同事务：补账本 + pending_event + 推游标）。
- * 本卡不实现——缺省仅 error 日志：游标未动，重连后 since 补拉重投（不丢，A2）。
- */
-export type DeadLetterHandler = (event: GatewayEventEnvelope, err: unknown) => Promise<void>;
+// DeadLetterHandler 类型归 deadletter.ts（T-P2-04 落地后签名升级为上下文对象：
+// 死信收口需要 pool/tracker/logger 才能三写同事务 + 推进游标）。re-export 保持既有导入面。
+export type { DeadLetterContext, DeadLetterHandler } from './deadletter.js';
 
 export interface EventConsumerOptions {
   readonly pool: Pool;
@@ -51,7 +55,7 @@ export interface EventConsumerOptions {
   /** 测试注入缝：退避递进参数；缺省 SSE_RECONNECT_BACKOFF_START_MS / _MAX_MS（DES/08 §1.1） */
   readonly backoffStartMs?: number;
   readonly backoffMaxMs?: number;
-  /** T-P2-04 死信缝（本卡不实现，缺省仅日志） */
+  /** 测试注入缝：死信收口（T-P2-04 已接线，缺省 = deadletter.ts 三写事务实现） */
   readonly deadLetter?: DeadLetterHandler;
 }
 
@@ -77,10 +81,13 @@ function resolveType(frame: SseFrame): string {
 
 /**
  * 事件处理事务（DES/08 §1.2）：a) INSERT gateway_event ON CONFLICT DO NOTHING（重复推送吸收，
- * 游标照常推进）b) 按 type 分发（事务内、handler 幂等；未知 type → log + skip）
+ * 游标照常推进）b') 孤儿分流判定（D3-1：永久孤儿 → 同事务 inconsistency + 跳分发；
+ * 建群窗口孤儿 → 抛 OrphanWindowedError 回滚整事务、走死信短重试）
+ * b) 按 type 分发（事务内、handler 幂等；未知 type → log + skip）
  * c) 连续前缀游标推进（UPDATE 只在本事务内）。
  * 事务失败 → 全部回滚、内存镜像不动：游标 gap 保证重连后 since 补拉重投（不丢）；
- * 收口交 deadLetter 缝（T-P2-04）。本函数永不 throw——消费循环绝不因单事件中断（A2）。
+ * 收口交 deadLetter 缝（T-P2-04：缺省 = deadletter.ts 三写事务）。本函数永不 throw——
+ * 消费循环绝不因单事件中断（A2）。
  */
 export async function handleEventFrame(deps: EventFrameDeps, frame: SseFrame): Promise<void> {
   if (frame.eventId === null) return; // 心跳 / 无 id 帧：不入账、不推游标
@@ -88,6 +95,7 @@ export async function handleEventFrame(deps: EventFrameDeps, frame: SseFrame): P
   const type = resolveType(frame);
   // 坏 JSON data（data=null）：账本记 rawData 原文（jsonb 字符串）——事件内容不丢（A2）
   const payload: unknown = frame.data ?? frame.rawData;
+  const event: GatewayEventEnvelope = { eventId, type, payload };
   try {
     await tx(deps.pool, async (client) => {
       // a) 入站幂等第一道闸（DES/02 §1.3）：at-least-once 重复推送在 PK 冲突处吸收
@@ -95,8 +103,16 @@ export async function handleEventFrame(deps: EventFrameDeps, frame: SseFrame): P
         'INSERT INTO gateway_event (event_id, type, payload) VALUES ($1, $2, $3::jsonb) ON CONFLICT (event_id) DO NOTHING',
         [eventId, type, JSON.stringify(payload)],
       );
-      // b) 分发（T-P2-06/08/09 的领域 handler 全须幂等——重复推送/补拉都会重放）
-      await dispatchEvent(deps.registry, { client, event: { eventId, type, payload }, logger: deps.logger });
+      // b') 孤儿分流（D3-1，§1.2）：永久孤儿同事务推 inconsistency(unknown_group_event)
+      //    并跳过分发；建群窗口内的引用未决回滚转死信短重试（映射很快出现）
+      const verdict = await classifyOrphan(client, event);
+      if (verdict.route === 'windowed') throw new OrphanWindowedError(verdict.message);
+      if (verdict.route === 'orphan') {
+        await insertInconsistency(client, event, 'unknown_group_event', verdict.message);
+      } else {
+        // b) 分发（T-P2-06/08/09 的领域 handler 全须幂等——重复推送/补拉都会重放）
+        await dispatchEvent(deps.registry, { client, event, logger: deps.logger });
+      }
       // c) 连续前缀游标（UPDATE 只在本事务内——卡片 d）
       await deps.tracker.advanceInTx(eventId, client);
     });
@@ -108,7 +124,13 @@ export async function handleEventFrame(deps: EventFrameDeps, frame: SseFrame): P
     );
     if (deps.deadLetter !== undefined) {
       try {
-        await deps.deadLetter({ eventId, type, payload }, err);
+        await deps.deadLetter({
+          event,
+          error: err,
+          pool: deps.pool,
+          tracker: deps.tracker,
+          logger: deps.logger,
+        });
       } catch (dlErr) {
         deps.logger.error({ err: dlErr, eventId }, 'dead-letter seam failed; event awaits redelivery');
       }
@@ -234,7 +256,14 @@ export function startEventConsumer(options: EventConsumerOptions): EventConsumer
       if (frameDeps === undefined) {
         try {
           const tracker = await loadCursorTracker(pool);
-          frameDeps = { pool, tracker, registry, logger, deadLetter: options.deadLetter };
+          // 死信缝缺省接线（T-P2-04）：测试经 options.deadLetter 注入 stub；生产走三写事务
+          frameDeps = {
+            pool,
+            tracker,
+            registry,
+            logger,
+            deadLetter: options.deadLetter ?? createDeadLetterHandler(),
+          };
           logger.info({ cursor: tracker.cursor }, 'event cursor loaded (seen rebuilt from gateway_event)');
         } catch (err) {
           logger.error({ err }, 'cursor tracker load failed; retrying');

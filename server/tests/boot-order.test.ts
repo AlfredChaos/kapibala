@@ -10,6 +10,7 @@ import pino, { type Logger } from 'pino';
 import { loadConfig, type AppConfig } from '../src/config/index.js';
 import { createGatewayClient } from '../src/gateway/client.js';
 import { boot, type BootHandle, type EventConsumer } from '../src/index.js';
+import { createDispatchRegistry } from '../src/events/dispatch.js';
 import { RECOVERY_SCANS, type RecoveryDeps, type RecoveryScan } from '../src/recovery/scans.js';
 import { createScheduler } from '../src/scheduler/index.js';
 import { createScanRegistry } from '../src/scheduler/registry.js';
@@ -52,12 +53,13 @@ function captureLogger(): { logger: Logger; messages: () => string[] } {
 
 /** 结构化捕获 fake（SchedulerLogger / RecoveryLogger 同形的最小日志面）；只记录 error 供断言 */
 function fakeBaseLogger(): {
-  logger: { info(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void };
+  logger: { info(obj: unknown, msg?: string): void; warn(obj: unknown, msg?: string): void; error(obj: unknown, msg?: string): void };
   errors: Array<{ obj: unknown; msg: string }>;
 } {
   const errors: Array<{ obj: unknown; msg: string }> = [];
   const logger = {
     info: (_obj: unknown, _msg?: string): void => {},
+    warn: (_obj: unknown, _msg?: string): void => {},
     error: (obj: unknown, msg?: string): void => {
       errors.push({ obj, msg: msg ?? '' });
     },
@@ -215,6 +217,8 @@ describe('boot order (T-P2-02)', () => {
     const health = await fetch(`http://127.0.0.1:${port}/api/health`);
     expect(health.status).toBe(200);
     await handle.recovery.done; // stub 扫描恒即刻完成（零工作项）
+    // T-P2-04 接线断言：缺省 boot 的调度注册表已挂 dead-letter 重试扫描（§1.4 常驻形态）
+    expect(handle.registry.scans().map((s) => s.name)).toContain('dead-letter');
     await handle.stop();
   });
 
@@ -265,9 +269,13 @@ describe('boot order (T-P2-02)', () => {
       pool: db.pool,
       logger,
       gateway: createGatewayClient({ baseUrl: 'http://127.0.0.1:4100' }),
+      dispatch: createDispatchRegistry(),
     };
-    for (const scan of RECOVERY_SCANS) {
+    for (const scan of RECOVERY_SCANS.slice(0, 5)) {
       expect(await scan.run(deps)).toBe(0);
     }
+    // 本用例无死信行 → 处理 0 条；行为断言归 dead-letter.test.ts
+    const pendingScan = RECOVERY_SCANS.find((s) => s.name === 'pending-events');
+    expect(await pendingScan?.run(deps)).toBe(0);
   });
 });

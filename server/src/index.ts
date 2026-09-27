@@ -16,6 +16,7 @@ import { ConfigError, loadConfig } from './config/index.js';
 import { createPool } from './db/pool.js';
 import { ensureSchemaVersion } from './db/ensure-schema.js';
 import { startEventConsumer } from './events/consumer.js';
+import { createDispatchRegistry, type DispatchRegistry } from './events/dispatch.js';
 import { createGatewayClient, type GatewayClient } from './gateway/client.js';
 import { createVerifyAccessToken } from './http/routes/auth.js';
 import { buildApp, type App } from './http/app.js';
@@ -23,6 +24,7 @@ import { startRecovery, type RecoveryHandle } from './recovery/index.js';
 import type { RecoveryScan } from './recovery/scans.js';
 import { createScheduler, type Scheduler } from './scheduler/index.js';
 import { createScanRegistry, type ScanRegistry } from './scheduler/registry.js';
+import { registerDeadLetterScan } from './scheduler/deadletter-scan.js';
 
 // ---------- SSE 消费 seam（T-P2-03 已接线：缺省 = events/consumer.ts 的真实消费循环） ----------
 
@@ -36,6 +38,8 @@ export interface EventConsumerDeps {
   readonly config: AppConfig;
   readonly logger: Logger;
   readonly gateway: GatewayClient;
+  /** 分发注册表（boot 共享实例：消费循环与死信重试/领域 handler 注册同表，T-P2-04+） */
+  readonly registry: DispatchRegistry;
 }
 
 /**
@@ -55,7 +59,9 @@ export interface BootOptions {
   recoveryScans?: readonly RecoveryScan[];
   /** 测试注入缝：缺省 events/consumer.ts 的真实消费循环（全局单飞 + 连续前缀游标 + 退避重连） */
   startConsumer?: StartEventConsumer;
-  /** 各域扫描的注册表；缺省空表（后续任务经 handle.registry 或 boot 前注册） */
+  /** 分发注册表（boot 共享实例：消费循环分发 + 死信重试 + 领域 handler 注册同表，T-P2-04）；缺省骨架 stub 注册表 */
+  dispatch?: DispatchRegistry;
+  /** 各域扫描的注册表；缺省空表 + dead-letter 注册行（T-P2-04 接线后恒存在） */
   registry?: ScanRegistry;
   /** 测试注入缝：tick 周期；缺省 SCHEDULER_TICK_MS */
   schedulerTickMs?: number;
@@ -64,6 +70,8 @@ export interface BootOptions {
 export interface BootHandle {
   readonly app: App;
   readonly pool: Pool;
+  /** 分发注册表（领域 handler 注册入口；消费循环/死信重试共用，T-P2-04+） */
+  readonly dispatch: DispatchRegistry;
   readonly registry: ScanRegistry;
   readonly scheduler: Scheduler;
   readonly recovery: RecoveryHandle;
@@ -93,9 +101,13 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   const app = await buildApp({ pool, logger, verifyAccessToken: createVerifyAccessToken(pool) });
   const gateway = createGatewayClient({ baseUrl: config.gatewayUrl });
 
+  // 分发注册表为 boot 共享实例（T-P2-04）：消费循环的分发、死信重试的 b) 重放、
+  // 后续领域任务（T-P2-06/08/09…）的 handler 注册，全部指向同一张表。
+  const dispatch = options.dispatch ?? createDispatchRegistry();
+
   // 2. 恢复扫描：登记同步完成，扫描体异步交接（D3-2，不 await done）
   const recovery = startRecovery({
-    deps: { pool, logger, gateway },
+    deps: { pool, logger, gateway, dispatch },
     scans: options.recoveryScans,
   });
 
@@ -104,21 +116,24 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   const startConsumer: StartEventConsumer =
     options.startConsumer ??
     ((deps) =>
-      // T-P2-03 接线：消费循环只需要 pool / gatewayUrl / logger（分发注册表与死信缝走 events/ 缺省）
+      // T-P2-03/04 接线：消费循环需要 pool / gatewayUrl / logger / 共享分发注册表（死信缝走缺省）
       startEventConsumer({
         pool: deps.pool,
         gatewayUrl: deps.config.gatewayUrl,
         logger: deps.logger,
+        registry: deps.registry,
       }));
   logger.info('starting events consumer');
   const consumer: Promise<EventConsumer> = (async () =>
-    startConsumer({ pool, config, logger, gateway }))();
+    startConsumer({ pool, config, logger, gateway, registry: dispatch }))();
   void consumer.catch((err: unknown) => {
     logger.error({ err }, 'events consumer failed to start');
   });
 
-  // 4. 调度器（1s 周期扫描注册表；扫描抛错 → error 日志且调度器不退出）
+  // 4. 调度器（1s 周期扫描注册表；扫描抛错 → error 日志且调度器不退出）。
+  //    死信重试扫描（T-P2-04）：注册名恒为 dead-letter，内部节流 5s 节拍（§1.4）。
   const registry = options.registry ?? createScanRegistry();
+  registerDeadLetterScan({ pool, registry, dispatch, logger });
   const scheduler = createScheduler({ registry, logger, tickMs: options.schedulerTickMs });
   scheduler.start();
 
@@ -155,7 +170,7 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
     logger.info('shutdown complete');
   };
 
-  return { app, pool, registry, scheduler, recovery, consumer, stop };
+  return { app, pool, dispatch, registry, scheduler, recovery, consumer, stop };
 }
 
 // ---------- 进程入口 ----------
