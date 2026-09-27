@@ -2,7 +2,9 @@
 // { switch, params?, target? }）。本任务只落 `playbook`（剧本装载）与 state/reset 观测面；
 // §7 故障开关（ag-1..19）的语义归 T-P4-02/03，此处先把全部 19 名登记进白名单——
 // 拼错开关名必须在 arrange 阶段就炸（与 mock-gateway KNOWN_SWITCHES 同一约定）。
+// ag-17 `s6_sequence` 例外：它是剧本素材开关，arm = 把三连剧本装进 playbooks（T-P4-02）。
 import type { FastifyInstance } from 'fastify';
+import { S6_SEQUENCE_STEPS } from './switches/protocol.js';
 
 /**
  * 剧本步（T-P4-01 先落合法形状；`raw` 为 T-P4-02 坏响应注入预留的穿透通道）。
@@ -150,7 +152,18 @@ export function registerTestEndpoints(app: FastifyInstance, state: AgentState, m
       }
       return reply.send({ armed: 'playbook', runId });
     }
-    // §7 故障开关：登记配置，语义由 providers/scripted.ts 随 T-P4-02/03 接线
+    // ag-17 `s6_sequence` 是剧本型开关：arm 把三连剧本装成该 runId（或通配）的剧本，游标归零同上。
+    if (switchName === 's6_sequence') {
+      const runId = typeof target['runId'] === 'string' && target['runId'] !== '' ? target['runId'] : '*';
+      state.playbooks.set(runId, [...S6_SEQUENCE_STEPS]);
+      if (runId === '*') {
+        state.cursors.clear();
+      } else {
+        state.cursors.delete(runId);
+      }
+      return reply.send({ armed: 's6_sequence', runId });
+    }
+    // §7 故障开关：登记配置，语义在 providers/scripted.ts（协议类 T-P4-02 / 行为类 T-P4-03）
     state.switches.set(switchName, { params, target });
     return reply.send({ armed: switchName });
   });
@@ -165,7 +178,8 @@ export function registerTestEndpoints(app: FastifyInstance, state: AgentState, m
       state.cursors.clear();
       return reply.send({});
     }
-    if (switchName === 'playbook') {
+    // 剧本型开关（playbook / s6_sequence）：clear 移除其剧本条目
+    if (switchName === 'playbook' || switchName === 's6_sequence') {
       const target = (body['target'] ?? {}) as Record<string, unknown>;
       const runId = typeof target['runId'] === 'string' && target['runId'] !== '' ? target['runId'] : '*';
       state.playbooks.delete(runId);

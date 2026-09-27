@@ -5,97 +5,19 @@
 // （无状态全量历史规约：响应只由 messages 决定，同 runId 相同 messages 重复请求 → 新响应）、
 // §3（剧本按 (runId,调用序号) 推进、播完回落默认剧本 get_recent_messages→send_message→finish；
 // `/_test/scenario` 装剧本是 arrange 唯一入口）；DES/06 §6（tools 常量在 server，本测试用
-// @kapibala/contract 的 AGENT_TOOLS 同一份类型）。
 import { describe, expect, it } from 'vitest';
+import { AGENT_TOOLS, type AgentMessage, type ToolDefinition } from '@kapibala/contract';
+import { createAgentApp } from '../src/app.js';
 import {
-  AGENT_TOOLS,
-  type AgentMessage,
-  type TextBlock,
-  type ToolDefinition,
-  type ToolUseBlock,
-  type TurnResponse,
-} from '@kapibala/contract';
-import { createAgentApp, type AgentApp } from '../src/app.js';
-
-function newApp(): AgentApp {
-  return createAgentApp({ mode: 'scripted' });
-}
-
-/** 合法触发上下文（REQ §2.2 messages[0] 的 text JSON 串） */
-function triggerContext(text = 'hello'): AgentMessage {
-  return {
-    role: 'user',
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify({
-          groupId: 'g-1',
-          triggerMessages: [
-            { msgId: 'm-1', senderPlatformUserId: 'puid-9', text, sentAt: '2026-09-27T00:00:00.000Z' },
-          ],
-          policy: { autoKickEnabled: false },
-          ownPlatformUserIds: ['puid-1'],
-        }),
-      },
-    ],
-  };
-}
-
-function toolUseMsg(block: ToolUseBlock): AgentMessage {
-  return { role: 'assistant', content: [block] };
-}
-
-function toolResultMsg(toolUseId: string, payload: unknown): AgentMessage {
-  return { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: JSON.stringify(payload) }] };
-}
-
-interface InjectLike {
-  statusCode: number;
-  json(): Promise<unknown>;
-}
-
-async function turn(
-  app: AgentApp,
-  runId: string,
-  messages: AgentMessage[],
-  tools: readonly ToolDefinition[] = AGENT_TOOLS,
-): Promise<InjectLike> {
-  return app.inject({ method: 'POST', url: '/agent/turn', payload: { runId, tools, messages } });
-}
-
-/** 断言 200 + 恰好一个 tool_use 块（窄化出块供后续断言） */
-async function expectToolUse(res: InjectLike): Promise<ToolUseBlock> {
-  expect(res.statusCode).toBe(200);
-  const body = (await res.json()) as TurnResponse;
-  expect(body.stop_reason).toBe('tool_use');
-  expect(body.content).toHaveLength(1);
-  const block = body.content[0];
-  if (block === undefined || block.type !== 'tool_use') {
-    throw new Error(`expected tool_use block, got: ${JSON.stringify(body)}`);
-  }
-  return block;
-}
-
-async function expectEndTurn(res: InjectLike): Promise<TextBlock> {
-  expect(res.statusCode).toBe(200);
-  const body = (await res.json()) as TurnResponse;
-  expect(body.stop_reason).toBe('end_turn');
-  expect(body.content).toHaveLength(1);
-  const block = body.content[0];
-  if (block === undefined || block.type !== 'text') {
-    throw new Error(`expected text block, got: ${JSON.stringify(body)}`);
-  }
-  return block;
-}
-
-async function scenario(
-  app: AgentApp,
-  switchName: string,
-  params?: Record<string, unknown>,
-  target?: Record<string, unknown>,
-): Promise<InjectLike> {
-  return app.inject({ method: 'POST', url: '/_test/scenario', payload: { switch: switchName, params, target } });
-}
+  expectEndTurn,
+  expectToolUse,
+  newApp,
+  scenario,
+  toolResultMsg,
+  toolUseMsg,
+  triggerContext,
+  turn,
+} from './helpers/agent.js';
 
 describe('tools 校验（REQ §2.2：恰好 4 个固定工具 + required 覆盖全部入参，否则 400 TOOLS_INVALID）', () => {
   it('数量 ≠4：缺一个 / 多一个 → 400 TOOLS_INVALID', async () => {

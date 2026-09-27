@@ -1,5 +1,6 @@
 // scripted provider（DES/12 §3）：确定性剧本引擎 + 默认剧本。
 // - 剧本步按 (runId, 调用序号) 推进；播完回落默认剧本「get_recent_messages → send_message → finish」。
+// - ag-1..7 协议故障开关（switches/protocol.ts）：命中即直接回故障响应，优先于剧本与默认路径。
 // - 无状态全量历史规约（DES/12 §2.1）：默认剧本的下一步只由请求 messages 推出——
 //   看最后一个已执行的 tool_use 决定剧本位置；同 runId 相同 messages 的重发返回新响应（新 tool_use.id）。
 // - /agent/audit 确定性 pass（故障形态 ag-14/15/16 归 T-P4-03）。
@@ -13,6 +14,7 @@ import type {
   TurnResponse,
 } from '@kapibala/contract';
 import type { AgentState, PlaybookStep } from '../scenario.js';
+import { applyProtocolFault } from '../switches/protocol.js';
 
 /** provider 给 HTTP 层的应答：json = 契约形状（序列化）；raw = 原样字节（故障注入通道） */
 export type ProviderReply = { kind: 'json'; value: unknown } | { kind: 'raw'; body: string; statusCode?: number };
@@ -121,6 +123,11 @@ function defaultTurn(state: AgentState, request: TurnRequest): ProviderReply {
 export function createScriptedProvider(state: AgentState): AgentProvider {
   return {
     turn(request) {
+      // 协议故障开关优先于剧本：持续型注入 = 命中开关的每次 turn 都炸（DES/12 §7 行 1–7）
+      const fault = applyProtocolFault(state, request.runId);
+      if (fault !== undefined) {
+        return fault;
+      }
       const steps = state.playbooks.get(request.runId) ?? state.playbooks.get('*');
       if (steps !== undefined) {
         const cursor = state.cursors.get(request.runId) ?? 0;
@@ -130,6 +137,7 @@ export function createScriptedProvider(state: AgentState): AgentProvider {
           return renderStep(state, step);
         }
       }
+
       return defaultTurn(state, request);
     },
     // audit 契约 {verdict:'pass'|'fail', reason}（REQ §2.2）：scripted 默认确定性 pass；
