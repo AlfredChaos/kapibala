@@ -2,6 +2,7 @@
 // 契约出处：DES/05 §4.3 逐字（预检 → 2a 常规回填 / 2b 先删占位行再改 M 行[次序不可换]
 // → 序列联动 → ws_event）；§2.5（message_failed 按码分流）；DES/02 §9 一行原则（D3-5 稳态一行）；
 // A2 分流表；D1-3（确认途径唯一收口——事件/by-client-id 共用同函数）。
+// 不变量：I3（时间线无重复行；(groupId,msgId) 唯一；回流合并一行——D1-3/D3-5 稳态断言）。
 // 形态：handler 级（构造 EventDispatchContext，事务内执行）+ finalizeSent 直接断言 outcome 三分支。
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { PoolClient } from 'pg';

@@ -16,16 +16,16 @@
 |---|---|---|---|
 | I1 | 网关已发出的每条我方消息 DB 必有记录 | `tests/crash/crash-consistency.test.ts`（崩溃点 ①） | ☑（crash 半边，T-P7-02）
 | I2 | 一条出站记录至多一条网关消息（重发 ≤1 且先确认未发出） | `tests/messages/unknown-adjudicator.test.ts`（开关 gw-7/8）+ crash ① | ☑（crash 半边，T-P7-02）
-| I3 | 时间线无重复行；(groupId,msgId) 唯一；回流合并一行 | `tests/messages/finalize-sent.test.ts`（含乱序合并稳态断言，D1-3/D3-5） | ☐ |
-| I4 | 每群至多一个 running agent run / 序列 run | `tests/agent/trigger.test.ts`、`tests/sequences/start-mutex.test.ts`（S7） | ☐ |
+| I3 | 时间线无重复行；(groupId,msgId) 唯一；回流合并一行 | `tests/messages/finalize-sent.test.ts`（含乱序合并稳态断言，D1-3/D3-5） | ☑ |
+| I4 | 每群至多一个 running agent run / 序列 run | `tests/agent/trigger.test.ts`、`tests/sequences/start-mutex.test.ts`（S7） | ☑ |
 | I5 | 账号只沿转移表变化；终态无出边；CAS 后写不覆盖 | `tests/accounts/state-machine.test.ts`（并发 CAS 注入） | ☑ |
 | I6 | 终态副作用原子（全有或全无；含在途转 unknown，D1-2） | `tests/accounts/terminal-side-effects.test.ts`（事务中途回滚注入 + 在途竞态） | ☑ |
-| I7 | WS 事件对应已持久化状态（同事务） | `tests/ws/hub.test.ts`（崩溃后重放无「先事件后状态」） | ☐ |
-| I8 | 游标只推进连续前缀；停机事件恢复后全部处理 | `tests/events/cursor-prefix.test.ts` + `tests/events/resume.test.ts` | ☐ |
-| I9 | unknown 5s 落定；by-client-id 不可用期间保持、恢复后 2s 内定 | `tests/messages/unknown-adjudicator.test.ts`（开关 gw-9） | ☐ |
+| I7 | WS 事件对应已持久化状态（同事务） | `tests/ws/hub.test.ts`（崩溃后重放无「先事件后状态」） | ☑ |
+| I8 | 游标只推进连续前缀；停机事件恢复后全部处理 | `tests/events/cursor-prefix.test.ts` + `tests/events/resume.test.ts` | ☑ |
+| I9 | unknown 5s 落定；by-client-id 不可用期间保持、恢复后 2s 内定 | `tests/messages/unknown-adjudicator.test.ts`（开关 gw-9） | ☑ |
 | I10 | agent run 恢复同 runId；已产生效果的工具不重放不记失败 | `tests/agent/crash-recovery.test.ts`（四个崩溃点 ×2/③） | ☑（crash 半边，T-P7-03） |
 | I11 | 序列重启只重排最早过期步骤；不一次性全发 | `tests/sequences/restart-reschedule.test.ts`（崩溃点 ④） | ☑（crash 半边，T-P7-04） |
-| I12 | WS seq 单调；sinceSeq 补发不重复；断线 3s 补齐 | `tests/ws/sinceseq.test.ts` | ☐ |
+| I12 | WS seq 单调；sinceSeq 补发不重复；断线 3s 补齐 | `tests/ws/sinceseq.test.ts` | ☑ |
 | I13 | refresh 复用整会话作废；logout 后 access 即失效 | `tests/auth/session.test.ts` | ☑ |
 | I14 | 契约时序数字不取整 | 常量集中定义 + `tests/constants.test.ts`（对照速查表逐个断言值） | ☑ |
 
@@ -33,14 +33,14 @@
 
 | # | 编排（开关组合） | 断言要点 | 用例文件 | 状态 |
 |---|---|---|---|---|
-| S1 | gw-1 + gw-2（钉值） | accepted→sent 流转、恰好一行 | `tests/scenarios/s1.test.ts` | ☐ |
-| S2 | gw-3（双推） | 时间线无重复、agent 不二触发 | `tests/scenarios/s2.test.ts` | ☐ |
-| S3 | 默认行为（回流） | isOwn=true 合并一行、不触发 run | `tests/scenarios/s3.test.ts` | ☐ |
-| S4 | gw-6 | rateLimitedUntil 正确；**counters.sendCallsByAccount=0**；到期按序发出 | `tests/scenarios/s4.test.ts` | ☐ |
-| S5 | gw-7 + agent-8 | 网关消息数=1；第二次调用返 sent；审计恰一次；run finished | `tests/scenarios/s5.test.ts` | ☐ |
-| S6 | agent-17（三连剧本） | run 终态合法、steps kind/rawResponse 齐全、进程不崩 | `tests/scenarios/s6.test.ts` | ☐ |
-| S7 | 并发两 POST | 恰好 201/409 | `tests/scenarios/s7.test.ts` | ☐ |
-| S8 | 构造第 3 步未解析占位符 | 422 字段齐全；counters.landedMessages=0；无运行记录 | `tests/scenarios/s8.test.ts` | ☐ |
+| S1 | gw-1 + gw-2（钉值） | accepted→sent 流转、恰好一行 | `tests/scenarios/s1.test.ts` | ☑ |
+| S2 | gw-3（双推） | 时间线无重复、agent 不二触发 | `tests/scenarios/s2.test.ts` | ☑ |
+| S3 | 默认行为（回流） | isOwn=true 合并一行、不触发 run | `tests/scenarios/s3.test.ts` | ☑ |
+| S4 | gw-6 | rateLimitedUntil 正确；**counters.sendCallsByAccount=0**；到期按序发出 | `tests/scenarios/s4.test.ts` | ☑ |
+| S5 | gw-7 + agent-8 | 网关消息数=1；第二次调用返 sent；审计恰一次；run finished | `tests/scenarios/s5.test.ts` | ☑ |
+| S6 | agent-17（三连剧本） | run 终态合法、steps kind/rawResponse 齐全、进程不崩 | `tests/scenarios/s6.test.ts` | ☑ |
+| S7 | 并发两 POST | 恰好 201/409 | `tests/scenarios/s7.test.ts` | ☑ |
+| S8 | 构造第 3 步未解析占位符 | 422 字段齐全；counters.landedMessages=0；无运行记录 | `tests/scenarios/s8.test.ts` | ☑ |
 
 ## 3. mock 开关 → 代表用例
 
@@ -85,26 +85,26 @@
 
 | 修复项 | 回归断言 | 用例 | 状态 |
 |---|---|---|---|
-| D1-1 死信三写同事务 | 制造永久性业务写失败（孤儿群 FK）→ 死信事务成功、消费循环推进、账本有行 | `tests/events/dead-letter.test.ts` | ☐ |
+| D1-1 死信三写同事务 | 制造永久性业务写失败（孤儿群 FK）→ 死信事务成功、消费循环推进、账本有行 | `tests/events/dead-letter.test.ts` | ☑ |
 | D1-2 终态 × 在途发送 | send 在途时注入终态事件 → 行转 unknown 而非 cancelled；202 回写落 accepted（守卫放宽归 T-P3-02）；回流不产生第二行 | `tests/accounts/terminal-side-effects.test.ts` | ☑ |
-| D1-3 finalizeSent 合并 | 乱序窗口 message→message_sent / by-client-id 200 补投两路径 → 稳态恰一行、序列步骤联动 | `tests/messages/finalize-sent.test.ts` | ☐ |
+| D1-3 finalizeSent 合并 | 乱序窗口 message→message_sent / by-client-id 200 补投两路径 → 稳态恰一行、序列步骤联动 | `tests/messages/finalize-sent.test.ts` | ☑ |
 | D2-1 成员事件乱序 | left(E2) 先到 joined(E1) 后到 → 终态账号不复活；joined 在途终态 → 墓碑行；迟到 joined 在终态处理之后到达且 event_id > last_event_id → 不复活（STALE 处理）；墓碑行冲突时 last_event_id 单调推进（GREATEST，双 leave 循环不复活） | `tests/groups/member-projection.test.ts` | ☑ |
-| D2-2 ALREADY_MEMBER | gw-22 → 成员行 UPSERT、promote 后 role=admin、GET members 含该账号 | `tests/groups/create-group-job.test.ts` | ☐ |
-| D2-5 限流登记守卫 | 429 与 disconnected 竞态 → rate_limited_until 恒 NULL（非 rate_limited 态） | `tests/accounts/rate-limit.test.ts` | ☐ |
-| X-1 kick 码表 | gw-24(504 仍在)/gw-17 → tool_result.code ∈ 13 码表（SEND_FAILED），细节在 message | `tests/agent/tools-kick.test.ts` | ☐ |
-| X-2 取消检查点 | send_message 步中关闭 agentEnabled → 当前步含 tool_result 完整落库、run cancelled、无悬挂 tool_use | `tests/agent/turn-loop.test.ts` | ☐ |
-| D3-1 孤儿事件 | 未知群 message 事件 → 账本+inconsistency、不进死信 | `tests/events/dead-letter.test.ts` | ☐ |
+| D2-2 ALREADY_MEMBER | gw-22 → 成员行 UPSERT、promote 后 role=admin、GET members 含该账号 | `tests/groups/create-group-job.test.ts` | ☑ |
+| D2-5 限流登记守卫 | 429 与 disconnected 竞态 → rate_limited_until 恒 NULL（非 rate_limited 态） | `tests/accounts/rate-limit.test.ts` | ☑ |
+| X-1 kick 码表 | gw-24(504 仍在)/gw-17 → tool_result.code ∈ 13 码表（SEND_FAILED），细节在 message | `tests/agent/tools-kick.test.ts` | ☑ |
+| X-2 取消检查点 | send_message 步中关闭 agentEnabled → 当前步含 tool_result 完整落库、run cancelled、无悬挂 tool_use | `tests/agent/turn-loop.test.ts` | ☑ |
+| D3-1 孤儿事件 | 未知群 message 事件 → 账本+inconsistency、不进死信 | `tests/events/dead-letter.test.ts` | ☑ |
 | D3-4 手动限流入参 | transition to=rate_limited 缺 rateLimitedUntil → 400 | `tests/accounts/transition.test.ts` | ☑ |
-| R-B 守卫 | END2/SWEEP 补建前复查 group.status+agent_enabled；守卫不过时积压行保留 | `tests/agent/trigger-queue-guard.test.ts` | ☐ |
+| R-B 守卫 | END2/SWEEP 补建前复查 group.status+agent_enabled；守卫不过时积压行保留 | `tests/agent/trigger-queue-guard.test.ts` | ☑ |
 
 ## 6. 进度总览
 
-- [ ] I1–I14（14 条）
-- [ ] S1–S8（8 条）
-- [ ] gw-1–28（28 项开关各有代表用例）
-- [ ] ag-1–19（19 项开关各有代表用例）
-- [ ] 崩溃注入 4 点
-- [ ] 审查回归 11 项
+- [x] I1–I14（14 条）
+- [x] S1–S8（8 条）
+- [x] gw-1–28（28 项开关各有代表用例）
+- [x] ag-1–19（19 项开关各有代表用例）
+- [x] 崩溃注入 4 点
+- [x] 审查回归 11 项
 
 ### 6.1 阶段门 P0 验收明细（00-SPEC §5 编号；勾选 = 用例已落地且任务审查通过）
 

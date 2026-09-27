@@ -322,6 +322,13 @@
 - 踩坑（本卡衍生，T-P8-03 修补）：e2e state 文件竞态的第三种错法——把删除挪 globalSetup 仍输（globalSetup 跑在全部 webServer ready 后；vite probe 慢的轮次里 backend 已写完 ready 又被删 → 测试饿死）。nonce 方案也因 webServer spawn env 链路未透传而放弃。落地形态：**backend 进程启动第一行 rm state + 装配完才写 ready**（存在⇒本轮所写；backend 没起来则文件不存在→测试显性失败）。fix commit e2c288f。
 - VITEST 登记：本卡纯文档+脚本验证，无新用例；完成度表已如实反映矩阵簿记在飞。
 
+## 2026-09-28 T-P7-05 I1-I14 映射核对 + VITEST_PLAN 收口（P7 阶段门）
+- 做了什么：① I1-I14 逐条 grep 校对——I3/I12 无测试文件引用编号 → 补头注（`finalize-sent.test.ts` 挂 I3/D1-3/D3-5 稳态；`sinceseq.test.ts` 挂 I12 seq 单调/sinceSeq 不重复），其余 12 条各≥1 文件命中具名编号；② VITEST_PLAN 全表收口——I3/I4/I7/I8/I9/I12、S-1..S-8、§5 回归 8 行（D1-1/D2-2/D2-5/D3-1/D3-4/D3-5/X-1/X-2/R-B）从 ☐ → ☑，§6 六检查点全勾；③ 补登 5 条缺失 JOURNAL（T-P3-10/T-P4-01/02/03/14，据 commit 7d5719b/235c3e0/46075e2/8a6e108/9c835d3 的 stat+被引测试回推）；④ 套件稳定性修复：`vitest.config.ts` `testTimeout` 5000→20000 + `maxWorkers:4`。
+- 核对结论：00-SPEC §5.1 矩阵恰 125 行（A21+B8+C21+D13+E39+F19+G3+H1 与 design/11 统计一致），抽查任务列全部命中 02-TASKS 已有任务号、验证载体列所指测试文件全部存在（脚本化全查非抽样）；VITEST_PLAN 无残余 ☐（除图例行），无需裁剪记录进 README 完成度表（完成度表本体属 T-P8-04）。
+- 验证命令与输出摘录：`pnpm -F server test` → **57 文件 / 434 用例全绿（87.9s）**；`grep -rl "I<N>" server/tests` → I1-I14 各 ≥1 文件。
+- 偏差与【解读】：① I3/I12 语义本有覆盖（finalize-sent 稳态断言 / sinceseq 补发），缺的是**用例名/头注对编号的引用**——补注不改断言，非空洞凑数（断言先于核对存在）；② VITEST_PLAN 的 gw/ag 表只列 S 场景挂的 mock 用例文件名+设计行号、无勾选列，由 §6 「gw-1-28 / ag-1-19 各有代表用例」检查点承载收口（28+19 项逐号核对均已有 mock 侧测试文件）。
+- 踩坑：① **全核并行 + 每文件独立库 + 崩溃子进程 = 随机 flake**——三次全量跑各落 1-2 个 5s 超时/断言 race（hub 背压、dispatcher wake、s6、create-group-job、restart-reschedule 轮流中招），单跑全过；另积累 126 个泄漏测试库 + 88 空闲连接把 PG `max_connections` 打满（「sorry, too many clients」连锁失败 40 文件）。修复：`maxWorkers:4` + `testTimeout:20000`（契约计时断言在断言行内，不被稀释）；泄漏库手动 DROP 回收。防再犯：全量验证前先看 `pg_stat_activity` / `kapibala_test_*` 库数；若同类 flake 第二次出现，升级为 §3/§5 规约。② 重跑前不 drain PG 会把「连接耗尽」伪装成「断言回归」——先清库再跑。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

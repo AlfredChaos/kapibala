@@ -1,4 +1,4 @@
-// T-P2-10 c)：sinceSeq 补发语义（DES/08 §2.2、B4 服务端半边、A4）——
+// T-P2-10 c)：sinceSeq 补发语义（I12：seq 全局单调、sinceSeq 补发不重复、断线 3s 补齐）——（DES/08 §2.2、B4 服务端半边、A4）——
 // seq>S 独占升序回放、与实时帧交叠零重复（seq 去重由 lastSentSeq 水位兜底）、
 // 断线 ≤3s 补齐形态（重连 auth+sinceSeq 纯 DB 读毫秒级）、保留窗口过期 →
 // ws_backlog_expired + 从现存最小 seq 回放、BIGSERIAL 单调分配非内存计数、
