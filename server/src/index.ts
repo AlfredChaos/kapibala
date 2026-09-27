@@ -20,6 +20,7 @@ import { createDispatchRegistry, type DispatchRegistry } from './events/dispatch
 import { createAccountStatusHandler } from './events/handlers/account-status.js';
 import { createMessageHandler } from './events/handlers/message.js';
 import { createMemberHandler } from './events/handlers/member.js';
+import { createMessageSentHandler, createMessageFailedHandler } from './events/handlers/confirm.js';
 import { createGatewayClient, type GatewayClient } from './gateway/client.js';
 import { createVerifyAccessToken } from './http/routes/auth.js';
 import { buildApp, type App } from './http/app.js';
@@ -32,6 +33,7 @@ import { registerRateLimitScan } from './scheduler/ratelimit-scan.js';
 import { registerJoinTimeoutScan } from './scheduler/join-timeout-scan.js';
 import { registerDispatchWakeupScan } from './scheduler/dispatch-wakeup.js';
 import { startOutboundDispatcher, type OutboundDispatcher } from './modules/messages/dispatcher.js';
+import { registerUnknownSettleScan } from './scheduler/unknown-scan.js';
 import { attachWsHub, type WsHub } from './ws/hub.js';
 import { createWsEventRetentionScan, WS_EVENT_RETENTION_SCAN_NAME } from './ws/retention.js';
 
@@ -135,10 +137,12 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   const memberHandler = createMemberHandler(logger);
   dispatch.register('member_joined', memberHandler);
   dispatch.register('member_left', memberHandler);
+  dispatch.register('message_sent', createMessageSentHandler(logger));
+  dispatch.register('message_failed', createMessageFailedHandler(logger));
 
   // 2. 恢复扫描：登记同步完成，扫描体异步交接（D3-2，不 await done）
   const recovery = startRecovery({
-    deps: { pool, logger, gateway, dispatch },
+    deps: { pool, logger, gateway, dispatch, wakeDispatcher: outboundDispatcher.wake },
     scans: options.recoveryScans,
   });
 
@@ -169,6 +173,7 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   registerRateLimitScan({ pool, registry, logger, wakeDispatcher: outboundDispatcher.wake }); // T-P2-07：到期回 online + 唤醒 dispatcher
   registerDispatchWakeupScan({ pool, registry, logger, wake: outboundDispatcher.wake }); // T-P3-02：queued 漏唤醒兜底（1s 节拍）
   registerJoinTimeoutScan({ pool, registry }); // T-P3-06：waiting_joins 的 join_deadline 超时收口
+  registerUnknownSettleScan({ pool, registry, logger, gateway, wakeDispatcher: outboundDispatcher.wake }); // T-P3-03：unknown 判定器 1s 兜底节拍
   registry.register(WS_EVENT_RETENTION_SCAN_NAME, createWsEventRetentionScan({ pool }));
   // WS hub（T-P2-10）：挂在共享 app.server 的 /ws 升级路径（DES/01 同端口）；
   // 监听前先 attach——upgrade 监听随 listen 生效，boot 测试断言 attach 顺序无要求。
