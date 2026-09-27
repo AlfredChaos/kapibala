@@ -28,6 +28,8 @@ export interface MockGroupState {
   members: Set<string>;
   /** 解散/禁言开关（开关 14） */
   writeForbidden: boolean;
+  /** 已被 promote 的成员 puid（T-P1-03 additive；kick 的「非群主且未被 promote」判定用） */
+  promoted: Set<string>;
   invite?: MockInvite;
 }
 
