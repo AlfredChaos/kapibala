@@ -92,3 +92,9 @@ docs/            需求与拆解
 - 修复：游标持久化到 DB；重连固定带 `since=<cursor>`（独占语义，eventId > cursor）
 - 防再犯：回归测试 server/src/events/resume.test.ts；对应 §3 第 1 条
 -->
+
+### 2026-09-27 WS sinceSeq 水位自陷（超前 → 永久不投递）
+- 症状：`sinceSeq` 大于现存 `max(seq)` 的连接此后收不到任何事件（测试 waitFor 超时）
+- 根因：连接水位直接采信客户端 sinceSeq；回放集为空时水位停在未来 seq，后续所有提交 seq < 水位永远被过滤——自陷死锁
+- 修复：`lastSentSeq = min(sinceSeq, maxSeq)`（钳制到真实 max；最坏多收 ≤ 窗口行，幂等吸收）
+- 防再犯：回归测试 server/tests/ws/sinceseq.test.ts（「sinceSeq beyond current max」用例）；同提交修复 sinceSeq=0 误报 ws_backlog_expired（0 是全量回放哨兵不是被清行，BIGSERIAL 从 1 起）

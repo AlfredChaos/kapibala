@@ -121,6 +121,14 @@
 
 ---
 
+## 2026-09-27 T-P2-10 WS hub + ws_event（I7/I12）
+- 做了什么：`server/src/ws/` 落地——`hub.ts`（`/ws` 升级只认同端口路径、auth 帧验证 accessToken 查表、`{type:'auth',success}` 回执门控、每连接 lastSentSeq 水位 + sinceSeq 独占补发升序、进程内 `notifyWsEventCommitted` 直推 + `WS_EVENT_POLL_MS=250` 兜底轮询、30s 心跳终止僵死连接、`WS_SEND_QUEUE_LIMIT` 背压断开）、`retention.ts`（30min 窗口条件 DELETE 扫描，boot 注册进调度器）、`notify.ts`（业务事务 COMMIT 后唤醒投递的缝）。`index.ts` 接线：注册表 + attachWsHub(app.server) + stop/监听失败路径 close。
+- 验证命令与输出摘录：**先红后绿**——两个测试文件先行，`npx vitest run tests/ws/` 首跑 **4 failed**（全部指向真缺陷而非用例笔误）：① sinceSeq>maxSeq → 水位自陷永久不投递；② sinceSeq=0 误报 ws_backlog_expired；③ 过期用例 sinceSeq 越界为 ≤0 被 parser 丢弃（用例修正为「水位指向被清行」）；④ 交叠用例漏算 auth 前已提交行。修复后 **72 passed**（hub+sinceseq+constants）；全量 `npx vitest run` → **162 passed / 14 文件**、`npx tsc --noEmit` 0 错、eslint clean。**真实 boot() 冒烟**（tsx 脚本跑 index.ts 编排）：连接 `/ws` 未认证跨 ≥1 轮询节拍零帧；auth+sinceSeq=0 收到 success+全量回放；事务提交后实时帧到达；`handle.stop()` 干净退出（WS 连接不挂 fastify close）。
+- 偏差与【解读】：① 解读 #20 的 sinceSeq 语义取字面「表里已无该行」——`sinceSeq ≥ min(seq)` 不告警；`sinceSeq=0` 是 BIGSERIAL 前的哨兵（全量回放）而非过期，豁免告警。② 水位钳制 `min(sinceSeq,maxSeq)`：超前水位不是过期场景、回放集为空，若采信则永不可达——钳制后最坏多收 ≤ 窗口行（客户端 seq 去重吸收，B4）。③ min/max 用单条聚合同一快照取，避免两次查询之间行被清/被插撕裂判定。④ hub.close() 必须在 app.close() 之前：WS 升级连接不属于 fastify 生命周期，不先断开会挂住 server.close()。
+- 踩坑：sinceSeq 水位自陷 + 0 哨兵误报（详见 AGENTS.md §7 同日条目）。
+- VITEST 登记：§5.2 的 I7（hub.test.ts）、I12（sinceseq.test.ts）、A-18/19、A4-2、B4-1（服务端半边）应勾——按 SP-6 规则登记于此，勾选在阶段门统一执行。
+---
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

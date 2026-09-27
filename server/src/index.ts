@@ -25,6 +25,8 @@ import type { RecoveryScan } from './recovery/scans.js';
 import { createScheduler, type Scheduler } from './scheduler/index.js';
 import { createScanRegistry, type ScanRegistry } from './scheduler/registry.js';
 import { registerDeadLetterScan } from './scheduler/deadletter-scan.js';
+import { attachWsHub, type WsHub } from './ws/hub.js';
+import { createWsEventRetentionScan, WS_EVENT_RETENTION_SCAN_NAME } from './ws/retention.js';
 
 // ---------- SSE 消费 seam（T-P2-03 已接线：缺省 = events/consumer.ts 的真实消费循环） ----------
 
@@ -75,6 +77,8 @@ export interface BootHandle {
   readonly registry: ScanRegistry;
   readonly scheduler: Scheduler;
   readonly recovery: RecoveryHandle;
+  /** WS hub 句柄（/ws 升级 + ws_event 投递；T-P2-10） */
+  readonly wsHub: WsHub;
   /** 消费句柄；boot 返回时可能仍 pending（D3-2），stop() 会 await 后关停 */
   readonly consumer: Promise<EventConsumer>;
   stop(): Promise<void>;
@@ -131,18 +135,22 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   });
 
   // 4. 调度器（1s 周期扫描注册表；扫描抛错 → error 日志且调度器不退出）。
-  //    死信重试扫描（T-P2-04）：注册名恒为 dead-letter，内部节流 5s 节拍（§1.4）。
+  //    已接线扫描：dead-letter（T-P2-04，5s 节流）、ws-event-retention（T-P2-10，30min 窗口清理）。
   const registry = options.registry ?? createScanRegistry();
   registerDeadLetterScan({ pool, registry, dispatch, logger });
+  registry.register(WS_EVENT_RETENTION_SCAN_NAME, createWsEventRetentionScan({ pool }));
+  // WS hub（T-P2-10）：挂在共享 app.server 的 /ws 升级路径（DES/01 同端口）；
+  // 监听前先 attach——upgrade 监听随 listen 生效，boot 测试断言 attach 顺序无要求。
+  const wsHub = attachWsHub(app.server, { pool, logger });
   const scheduler = createScheduler({ registry, logger, tickMs: options.schedulerTickMs });
   scheduler.start();
-
   // 5. HTTP 监听（最后开放流量；「先恢复世界一致性，再开放流量」——DES/01 §7）。
   //    监听失败（如端口占用）：收回已启动的调度器/消费 seam/pool 再抛——boot 是可反复调用的库函数。
   let address: string;
   try {
     address = await app.listen({ port: config.port, host: '0.0.0.0' });
   } catch (err) {
+    await wsHub.close();
     await scheduler.stop();
     void consumer.then((c) => c.stop()).catch((stopErr: unknown) => {
       logger.error({ err: stopErr }, 'consumer stop after failed listen failed');
@@ -164,13 +172,14 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
     } catch (err) {
       logger.error({ err }, 'events consumer stop failed');
     }
+    await wsHub.close(); // 断开升级连接后再收 app——WS 连接不属于 fastify 生命周期
     await app.close();
     await recovery.done; // 不会 reject：单扫描错误已在 startRecovery 内捕获记录
     await pool.end();
     logger.info('shutdown complete');
   };
 
-  return { app, pool, dispatch, registry, scheduler, recovery, consumer, stop };
+  return { app, pool, dispatch, registry, scheduler, recovery, wsHub, consumer, stop };
 }
 
 // ---------- 进程入口 ----------

@@ -38,7 +38,7 @@ const QR_TABLE: ReadonlyArray<readonly [keyof typeof C, number]> = [
   ['MEDIA_RETENTION_DAYS_DEFAULT', 30], // 默认，可配
 ];
 
-// —— 设计值（25 项，出处见 constants.ts 注释）——
+// —— 设计值（28 项，出处见 constants.ts 注释）——
 const DESIGN_TABLE: ReadonlyArray<readonly [keyof typeof C, number | boolean]> = [
   ['GATEWAY_TIMEOUT_DEFAULT_MS', 10000], // DES/01 §4.4
   ['KICK_TIMEOUT_MS', 6000], // DES/01 §4.4
@@ -54,6 +54,7 @@ const DESIGN_TABLE: ReadonlyArray<readonly [keyof typeof C, number | boolean]> =
   ['WS_HEARTBEAT_MS', 30000], // DES/08 §2.4
   ['WS_EVENT_RETENTION_MINUTES', 30], // DES/02 §1.5
   ['WS_SEND_QUEUE_LIMIT', 1000], // DES/08 §2.4
+  ['WS_EVENT_POLL_MS', 250], // DES/08 §2.2 兜底轮询节拍（T-P2-10 落地时登记）
   ['LEAVE_ALL_CONFIRM_TIMEOUT_MS', 5000], // DES/04 §3.2
   ['AGENT_MAX_CONCURRENT_RUNS', 50], // DES/01 §6.1
   ['AGENT_LEASE_RENEW_MS', 2000], // DES/06 §2.1
@@ -84,8 +85,8 @@ describe('设计值常量逐个断言（【设计值】+ 出处）', () => {
     expect(C[key]).toBe(value);
   });
 
-  it('常量总数守恒：29 契约 + 27 设计 = 56，禁止静默增删', () => {
-    expect(Object.keys(C)).toHaveLength(56);
-    expect(DESIGN_TABLE).toHaveLength(27);
+  it('常量总数守恒：29 契约 + 28 设计 = 57，禁止静默增删', () => {
+    expect(Object.keys(C)).toHaveLength(57);
+    expect(DESIGN_TABLE).toHaveLength(28);
   });
 });
