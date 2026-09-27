@@ -9,6 +9,7 @@ import { registerTestPlane } from './test-plane.js';
 import { createGatewayState, DEFAULT_SEED_ACCOUNTS, type GatewayState } from './state.js';
 import { createDupDelivery } from './switches/basic.js';
 import { createReorderDelivery } from './switches/timing.js';
+import { registerGatewayOutageHook } from './switches/outbound.js';
 
 /** Fastify 实例 + 状态句柄（测试与后续域模块直接读状态/账本） */
 export type GatewayApp = FastifyInstance & { gatewayState: GatewayState };
@@ -39,6 +40,9 @@ export function createGatewayApp(options: GatewayAppOptions = {}): GatewayApp {
   const app = Fastify({ logger: options.logger === true }) as unknown as GatewayApp;
   app.decorate('gatewayState', state);
 
+  // gw-10 `gateway_503_all`：整体不可用 → 所有业务端点 503（控制平面 /_test 豁免，否则开关关不掉）。
+  // 必须在路由之前注册：拦截发生在业务处理与调用计数之前（网关不可用 = 调用未被受理）。
+  registerGatewayOutageHook(app, state);
   registerAccountRoutes(app, state);
   registerTestPlane(app, state);
   // SSE 推送器（T-P1-02）+ 投递链（DES/14 §3「推送器按开关修饰后投递」）：
@@ -52,6 +56,6 @@ export function createGatewayApp(options: GatewayAppOptions = {}): GatewayApp {
   });
   registerGroupRoutes(app, state); // T-P1-03（最小 wiring 适配）
   registerMessagingRoutes(app, state); // T-P1-04（最小 wiring 适配）
-  registerMediaRoutes(app); // T-P1-04（最小 wiring 适配）
+  registerMediaRoutes(app, state); // T-P3-09：gw-27 真实媒体字节 + 过期 404
   return app;
 }

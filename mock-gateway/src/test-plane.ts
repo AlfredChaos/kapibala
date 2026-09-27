@@ -10,6 +10,8 @@ import {
   type SwitchConfig,
 } from './state.js';
 import { injectExternalMemberEvents, injectOfflineBacklog } from './switches/backlog.js';
+import { applyOutboundSwitch } from './switches/outbound.js';
+import { applyTerminalSwitch } from './switches/terminal.js';
 
 /**
  * 合法开关名全集（DES/14 §5 清单逐字；一行两名的拆开登记）。
@@ -50,46 +52,29 @@ const KNOWN_SWITCHES: readonly string[] = [
 ];
 
 /**
- * 账号域开关的即时接线（开关 11/12）：scenario 打开即置终态标志，clear 即撤销。
- * 返回错误信息 = arrange 失败（target.accountId 给了但账号不存在 → 调用方 400）：
- * 测试平面契约是「拼错目标必须在 arrange 阶段炸」，不静默无效、不自动建号。
- * clear 路径（enabling=false）对已消失的账号宽容——只做拆除，不做断言
- * （reset 恢复种子后 clear 旧开关是合法时序）。
+ * arm（打开开关）时刻的即时接线：gw-11/12/13 置账号终态标志（gw-13 另推 `account_status` 并自动移出所有群）、
+ * gw-9/10 归一不可用窗口、gw-14 置群禁写位、gw-15 校验 `code` 参数、gw-5/gw-28 注入账本事件。
+ * 返回非 null = arrange 失败 → 400 且开关不登记（半生效状态比拒绝更糟；拼错目标/参数必须当场炸）。
  */
-function applyAccountDomainSwitch(
-  state: GatewayState,
-  switchName: string,
-  config: SwitchConfig,
-  enabling: boolean,
-): string | null {
-  if (switchName !== 'account_suspended_403' && switchName !== 'session_expired_401') {
-    return null;
-  }
-  const target = config.target?.['accountId'];
-  if (typeof target !== 'string') {
-    return null; // 未给 target：不适用账号域接线（开关登记仍成功，行为接线归后续域任务）
-  }
-  const account = state.accounts.get(target);
-  if (account === undefined) {
-    return enabling ? `unknown target account: ${target}` : null;
-  }
-  if (switchName === 'account_suspended_403') {
-    account.suspended = enabling;
-  } else {
-    account.sessionExpired = enabling;
-  }
-  return null;
+function armSwitch(state: GatewayState, switchName: string, config: SwitchConfig): string | null {
+  return (
+    applyTerminalSwitch(state, switchName, config, true) ??
+    applyOutboundSwitch(state, switchName, config, true) ??
+    injectArmTimeFrames(state, switchName, config)
+  );
 }
 
 /**
- * arm（打开开关）时刻的即时接线：开关 11/12 置账号终态标志、gw-5 注入离线补投帧、
- * gw-28 注入外部成员进出群事件。返回非 null = arrange 失败 → 400 且开关不登记（半生效比拒绝更糟）。
+ * clear（关闭开关）：只撤销有状态标志（账号终态、群禁写位）——已推的账本事件与已发生的成员变更
+ * 不撤回（账本 append-only）。clear 一律宽容：reset 恢复种子后再 clear 旧开关是合法时序。
  */
-function armSwitch(state: GatewayState, switchName: string, config: SwitchConfig): string | null {
-  const accountError = applyAccountDomainSwitch(state, switchName, config, true);
-  if (accountError !== null) {
-    return accountError;
-  }
+function disarmSwitch(state: GatewayState, switchName: string, config: SwitchConfig): void {
+  applyTerminalSwitch(state, switchName, config, false);
+  applyOutboundSwitch(state, switchName, config, false);
+}
+
+/** gw-5 / gw-28：arm 时刻向账本注入契约事件（离线补投 / 外部成员进出群，见 switches/backlog.ts） */
+function injectArmTimeFrames(state: GatewayState, switchName: string, config: SwitchConfig): string | null {
   if (switchName === 'offline_backlog') {
     return injectOfflineBacklog(state, config);
   }
@@ -133,12 +118,12 @@ export function registerTestPlane(app: FastifyInstance, state: GatewayState): vo
   });
 
   // POST /_test/scenario/clear { switch? }：关闭指定/全部开关（DES/14 §4）。
-  // clear 只撤销有状态标志（11/12 终态）；gw-5/gw-28 已注入的账本事件不撤回（账本 append-only）。
+  // clear 只撤销有状态标志（gw-11/12/13 终态、gw-14 群禁写位）；gw-5/13/28 已注入的账本事件不撤回（append-only）。
   app.post('/_test/scenario/clear', async (request, reply) => {
     const body = (request.body ?? {}) as { switch?: unknown };
     if (body.switch === undefined) {
       for (const [name, config] of state.switches) {
-        applyAccountDomainSwitch(state, name, config, false);
+        disarmSwitch(state, name, config);
       }
       state.switches.clear();
       return reply.send({ ok: true });
@@ -148,7 +133,7 @@ export function registerTestPlane(app: FastifyInstance, state: GatewayState): vo
     }
     const config = state.switches.get(body.switch);
     if (config) {
-      applyAccountDomainSwitch(state, body.switch, config, false);
+      disarmSwitch(state, body.switch, config);
       state.switches.delete(body.switch);
     }
     return reply.send({ ok: true });

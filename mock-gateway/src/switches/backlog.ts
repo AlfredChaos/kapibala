@@ -61,6 +61,8 @@ export function injectOfflineBacklog(state: GatewayState, config: SwitchConfig):
       senderPlatformUserId: row.senderPuid,
       text: row.text,
       sentAt: row.sentAt,
+      // gw-27 的媒体链接同样按原值补投（server 侧 C1 可能仍未下载过它）
+      ...(row.mediaUrl === undefined ? {} : { mediaUrl: row.mediaUrl }),
     });
   }
   return null;

@@ -9,8 +9,10 @@ export interface MockAccountState {
   online: boolean;
   suspended: boolean;
   sessionExpired: boolean;
-  /** epoch ms；限流到期时刻（send 域使用，本任务只建字段） */
+  /** epoch ms；限流到期时刻（gw-6：期内任何 send 再 429 且计时重置，REQ §2.1） */
   rateLimitedUntil?: number;
+  /** 限流窗口内的 retryAfterSeconds：契约要求「再次得到**同样**错误」，故窗口内复用首次值 */
+  rateLimitRetryAfterSeconds?: number;
 }
 
 /** invite 链接状态（DES/14 §2 group 行；readyAfterMs / 过期由开关驱动，本任务只建形状） */
@@ -42,6 +44,17 @@ export interface MockMessageRecord {
   /** ISO 8601 UTC（宪法 §3-6） */
   sentAt: string;
   landed: boolean;
+  /** gw-27：message 事件携带的媒体链接（绝对 URL；server 侧 C1 直接 fetch 下载） */
+  mediaUrl?: string;
+}
+
+/** 媒体对象（gw-27；REQ §2.1：mediaUrl 指向 `GET /media/:id`，返回文件字节，过期后 404） */
+export interface MockMediaObject {
+  /** 文件字节（mock 自造的确定性内容） */
+  bytes: Uint8Array;
+  contentType: string;
+  /** epoch ms，创建时刻 */
+  createdAt: number;
 }
 
 /**
@@ -87,6 +100,8 @@ export interface GatewayState {
   groups: Map<string, MockGroupState>;
   /** clientMsgId → 有序落地列表（落地序） */
   messages: Map<string, MockMessageRecord[]>;
+  /** mediaId → 媒体对象（gw-27；reset 清空） */
+  media: Map<string, MockMediaObject>;
   ledger: LedgerFrame[];
   /**
    * eventId 分配器：进程生命周期单调、跨 reset 不复用（DES/14 §1 关键坑）。
@@ -142,6 +157,7 @@ export function createGatewayState(seedAccountIds: readonly string[] = DEFAULT_S
     accounts,
     groups: new Map(),
     messages: new Map(),
+    media: new Map(),
     ledger: [],
     eventIdCounter: 0,
     gwSeq: 0,
@@ -172,6 +188,7 @@ export function resetGatewayState(state: GatewayState, startEventId?: number): n
   }
   state.groups.clear();
   state.messages.clear();
+  state.media.clear();
   state.ledger = [];
   state.counters.sendCallsByAccount.clear();
   state.counters.sendCallsByClientMsgId.clear();

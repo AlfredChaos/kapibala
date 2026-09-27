@@ -2,11 +2,13 @@
 // 供群域 / 消息域 / 开关层（src/switches/*）共用：钉值、目标命中与契约区间随机源的唯一解释点。
 import type { GatewayState, SwitchConfig } from './state.js';
 
-/** 开关探查目标：按需携带（groupId / accountId / clientMsgId），缺省键 = 不限定 */
+/** 开关探查目标：按需携带（groupId / accountId / clientMsgId / mediaId），缺省键 = 不限定 */
 export interface SwitchTarget {
   groupId?: string;
   accountId?: string;
   clientMsgId?: string;
+  /** 媒体对象 id（gw-27 `media_expire_404` 按媒体收窄用） */
+  mediaId?: string;
 }
 
 /**
@@ -26,16 +28,10 @@ export function activeSwitch(
   if (target === undefined || config.target === undefined) {
     return config;
   }
+  // 配置侧声明的每个 target 键都必须在探查目标里取到同值；未声明的键不限定
+  const probed: Record<string, string | undefined> = { ...target };
   for (const [key, value] of Object.entries(config.target)) {
-    const probed =
-      key === 'groupId'
-        ? target.groupId
-        : key === 'accountId'
-          ? target.accountId
-          : key === 'clientMsgId'
-            ? target.clientMsgId
-            : undefined;
-    if (probed !== value) {
+    if (probed[key] !== value) {
       return undefined;
     }
   }

@@ -6,7 +6,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
 import type { GatewayApp } from '../src/app.js';
-import { createGatewayState, type LedgerFrame } from '../src/state.js';
+import { createGatewayState } from '../src/state.js';
 import { resolveMemberJoinedDelayMs } from '../src/switches/timing.js';
 import {
   clearScenario,
@@ -15,6 +15,7 @@ import {
   createGroup,
   createInvite,
   disconnect,
+  frameAt,
   framesOf,
   joinGroup,
   makeGroupWithMember,
@@ -24,6 +25,7 @@ import {
   puidOf,
   scenario,
   send,
+  singleFrame,
 } from './helpers/gateway.js';
 
 /** `/_test/emit` 手动注入（DES/14 §4）→ 返回分配的 eventId */
@@ -31,25 +33,6 @@ async function emit(app: GatewayApp, type: string, data: Record<string, unknown>
   const res = await app.inject({ method: 'POST', url: '/_test/emit', payload: { type, data } });
   expect(res.statusCode).toBe(200);
   return ((await res.json()) as { eventId: number }).eventId;
-}
-
-/** 取该类型第 index 帧；缺失即用例失败（收窄 undefined，不用非受控断言——宪法 §3-7） */
-function frameAt(app: GatewayApp, type: LedgerFrame['type'], index = 0): LedgerFrame {
-  const frame = framesOf(app, type)[index];
-  if (frame === undefined) {
-    throw new Error(`expected ledger frame #${index} of type ${type}`);
-  }
-  return frame;
-}
-
-/** 断言恰一帧并取出（同上：收窄 undefined） */
-function singleFrame(frames: readonly LedgerFrame[], label: string): LedgerFrame {
-  expect(frames, label).toHaveLength(1);
-  const frame = frames[0];
-  if (frame === undefined) {
-    throw new Error(`expected exactly one frame: ${label}`);
-  }
-  return frame;
 }
 
 describe('gw-4 reorder_1s：相邻帧交换投递（乱序窗口 ≤1s，DES/14 §5 行 4）', () => {

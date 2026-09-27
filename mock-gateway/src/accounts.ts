@@ -4,6 +4,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { GatewayAnyErrorCode } from '@kapibala/contract';
 import { ensureAccount, type GatewayState } from './state.js';
+import { isForcedOffline } from './switches/outbound.js';
 
 /** 闸门拒绝结果：路由层直接 `reply.code(statusCode).send(body)`（扁平错误体，契约形状） */
 export interface AccountGateError {
@@ -28,8 +29,8 @@ export function assertAccountOperationAllowed(
   if (account?.sessionExpired) {
     return { statusCode: 401, body: { code: 'SESSION_EXPIRED', message: 'account session expired' } };
   }
-  if (account === undefined || !account.online) {
-    // 未 connect / 已 disconnect 视同离线（开关 17）
+  if (account === undefined || !account.online || isForcedOffline(state, accountId)) {
+    // 未 connect / 已 disconnect 视同离线；gw-17 `account_offline_409` 对已连接账号强制注入同码（REQ §2.1）
     return { statusCode: 409, body: { code: 'ACCOUNT_OFFLINE', message: 'account not connected' } };
   }
   return null;

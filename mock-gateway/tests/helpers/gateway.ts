@@ -126,6 +126,11 @@ export async function send(
   });
 }
 
+/** GET by-client-id（REQ §2.1：200 {msgId,sentAt} 最早一条 / 404 / 503 整体不可用） */
+export async function byClientId(app: GatewayApp, groupId: string, clientMsgId: string): Promise<InjectResponse> {
+  return app.inject({ method: 'GET', url: `/groups/${groupId}/messages/by-client-id/${clientMsgId}` });
+}
+
 export async function membersOf(app: GatewayApp, groupId: string): Promise<string[]> {
   const res = await app.inject({ method: 'GET', url: `/groups/${groupId}/members` });
   expect(res.statusCode).toBe(200);
@@ -138,6 +143,34 @@ export function puidOf(app: GatewayApp, accountId: string): string {
 
 export function framesOf(app: GatewayApp, type: LedgerFrame['type']): LedgerFrame[] {
   return app.gatewayState.ledger.filter((frame) => frame.type === type);
+}
+
+/** 取该类型第 index 帧；缺失即用例失败（收窄 undefined，不用非受控断言——宪法 §3-7） */
+export function frameAt(app: GatewayApp, type: LedgerFrame['type'], index = 0): LedgerFrame {
+  const frame = framesOf(app, type)[index];
+  if (frame === undefined) {
+    throw new Error(`expected ledger frame #${index} of type ${type}`);
+  }
+  return frame;
+}
+
+/** 取该类型最后一帧；缺失即用例失败 */
+export function lastFrame(app: GatewayApp, type: LedgerFrame['type']): LedgerFrame {
+  const frame = framesOf(app, type).at(-1);
+  if (frame === undefined) {
+    throw new Error(`expected at least one ledger frame of type ${type}`);
+  }
+  return frame;
+}
+
+/** 断言恰一帧并取出（同上：收窄 undefined） */
+export function singleFrame(frames: readonly LedgerFrame[], label: string): LedgerFrame {
+  expect(frames, label).toHaveLength(1);
+  const frame = frames[0];
+  if (frame === undefined) {
+    throw new Error(`expected exactly one frame: ${label}`);
+  }
+  return frame;
 }
 
 /** 解析一个 SSE 帧块（`id:` / `event:` / `data:` 三行）；keepalive 注释行返回 null */
@@ -161,7 +194,24 @@ export function parseWireFrame(block: string): WireFrame | null {
 }
 
 /**
- * 经 app.listen + fetch 收 SSE 帧（收满 count 即断开；本函数负责 listen/close）。
+ * 在随机端口起真实 HTTP 服务并执行 fn（裸 fetch 场景：媒体下载、SSE 流、gw-10 的端点面）；
+ * 负责 listen 与 close。注意：close 之后 app 不能再 inject（Fastify 已关闭）。
+ */
+export async function withListening<T>(app: GatewayApp, fn: (baseUrl: string) => Promise<T>): Promise<T> {
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const address = app.server.address();
+  if (address === null || typeof address === 'string') {
+    throw new Error('expected TCP address');
+  }
+  try {
+    return await fn(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await app.close();
+  }
+}
+
+/**
+ * 经真实 TCP + fetch 收 SSE 帧（收满 count 即断开；listen/close 由 withListening 负责）。
  * onOpen 在连接建立后执行——实时帧必须在订阅之后产生（不带 since 时不回放历史，REQ §2.1）。
  */
 export async function collectFrames(
@@ -170,52 +220,47 @@ export async function collectFrames(
   count: number,
   onOpen?: () => Promise<void>,
 ): Promise<WireFrame[]> {
-  await app.listen({ port: 0, host: '127.0.0.1' });
-  const address = app.server.address();
-  if (address === null || typeof address === 'string') {
-    throw new Error('expected TCP address');
-  }
-  const baseUrl = `http://127.0.0.1:${address.port}`;
-  const controller = new AbortController();
-  const frames: WireFrame[] = [];
-  let collector: Promise<void> | undefined;
-  try {
-    collector = (async (): Promise<void> => {
-      const res = await fetch(`${baseUrl}${path}`, { signal: controller.signal });
-      const reader = res.body?.getReader();
-      if (reader === undefined) {
-        throw new Error('SSE response has no body');
-      }
-      const decoder = new TextDecoder();
-      let buffer = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) {
-          break;
+  return withListening(app, async (baseUrl): Promise<WireFrame[]> => {
+    const controller = new AbortController();
+    const frames: WireFrame[] = [];
+    let collector: Promise<void> | undefined;
+    try {
+      collector = (async (): Promise<void> => {
+        const res = await fetch(`${baseUrl}${path}`, { signal: controller.signal });
+        const reader = res.body?.getReader();
+        if (reader === undefined) {
+          throw new Error('SSE response has no body');
         }
-        buffer += decoder.decode(value, { stream: true });
-        let at = buffer.indexOf('\n\n');
-        while (at !== -1) {
-          const frame = parseWireFrame(buffer.slice(0, at));
-          buffer = buffer.slice(at + 2);
-          at = buffer.indexOf('\n\n');
-          if (frame !== null) {
-            frames.push(frame);
-            if (frames.length >= count) {
-              controller.abort();
-              return;
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let at = buffer.indexOf('\n\n');
+          while (at !== -1) {
+            const frame = parseWireFrame(buffer.slice(0, at));
+            buffer = buffer.slice(at + 2);
+            at = buffer.indexOf('\n\n');
+            if (frame !== null) {
+              frames.push(frame);
+              if (frames.length >= count) {
+                controller.abort();
+                return;
+              }
             }
           }
         }
-      }
-    })();
-    await sleep(150); // 等连接建立
-    await onOpen?.();
-    await collector;
-  } finally {
-    controller.abort();
-    await collector?.catch(() => undefined); // arrange 抛错时不留悬空 rejection
-    await app.close();
-  }
-  return frames;
+      })();
+      await sleep(150); // 等连接建立
+      await onOpen?.();
+      await collector;
+    } finally {
+      controller.abort();
+      await collector?.catch(() => undefined); // arrange 抛错时不留悬空 rejection
+    }
+    return frames;
+  });
 }

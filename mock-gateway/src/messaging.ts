@@ -1,19 +1,28 @@
-// send / kick / leave / members / by-client-id（T-P1-04）。
+// send / kick / leave / members / by-client-id（T-P1-04；出站开关判定归 switches/outbound.ts，T-P3-09）。
 // 契约出处：REQ §2.1 发消息节 + 群与成员节；DES/14 §2（消息按 clientMsgId 有序列表，不去重）、
 // §3（时序引擎：默认区间随机、scenario 钉值）、§5 注（message 全量回流是默认行为，S3 非开关）。
 import type { FastifyInstance } from 'fastify';
 import { assertAccountOperationAllowed, type AccountGateError } from './accounts.js';
+import { attachMedia, isMediaMessageEnabled, requestOrigin } from './media.js';
 import { appendLedger, type GatewayState, type MockMessageRecord } from './state.js';
-import { activeSwitch, randomBetween, readBooleanParam, readNumberParam, readStringParam } from './switches.js';
+import { activeSwitch, randomBetween, readBooleanParam, readNumberParam, type SwitchTarget } from './switches.js';
 import { resolveMessageSentDelayMs, resolveSendAcceptDelayMs } from './switches/basic.js';
+import {
+  isByClientIdOutage,
+  isForcedSenderNotInGroup,
+  isGroupWriteForbidden,
+  rateLimitRejection,
+  resolveMessageFailedCode,
+  resolveSendTimeout,
+  SEND504_LAND_MS,
+  UNAVAILABLE_BODY,
+} from './switches/outbound.js';
 
 // —— 契约时序（QR §1 / REQ §2.1）；mock 自持（不依赖 server 的 constants.ts）——
-// send 202（gw-1）与 message_sent（gw-2）的钉值/区间解析归 switches/basic.ts（T-P1-05）。
+// send 202（gw-1）/ message_sent（gw-2）归 switches/basic.ts；504 后 1.5s 落地（gw-7）归 switches/outbound.ts。
 /** kick 响应可能 1–5s（REQ §2.1；QR §1） */
 const KICK_LATENCY_MIN_MS = 1000;
 const KICK_LATENCY_MAX_MS = 5000;
-/** send_504_land_1500 的固定落地时延（DES/14 §3：S5 编排为 1.5s；契约 2s 内落地） */
-const SEND504_LAND_MS = 1500;
 
 function sendGateError(reply: { code: (s: number) => { send: (b: unknown) => unknown } }, gate: AccountGateError) {
   reply.code(gate.statusCode).send(gate.body);
@@ -43,6 +52,9 @@ export function registerMessagingRoutes(app: FastifyInstance, state: GatewayStat
       return reply.code(400).send({ message: 'accountId, clientMsgId and text are required' });
     }
     const { accountId, clientMsgId, text } = body;
+    // mediaUrl 必须是绝对 URL（server 的 downloadMedia 直接 fetch）：origin 只能在请求上下文里取，
+    // 而落地发生在定时器里（202 之后），故在此刻固定下来。
+    const origin = requestOrigin(request);
 
     // counters 是验收真值（DES/14 §4）：进入 send 即计（含将失败的尝试）
     state.counters.sendCallsByAccount.set(accountId, (state.counters.sendCallsByAccount.get(accountId) ?? 0) + 1);
@@ -64,64 +76,64 @@ export function registerMessagingRoutes(app: FastifyInstance, state: GatewayStat
       return reply.code(400).send({ message: `unknown account: ${accountId}` });
     }
 
-    // 429 RATE_LIMITED（开关 6）：期内任何 send 再 429 且计时重置（REQ §2.1）
-    const rateConfig = activeSwitch(state, 'rate_limit', { accountId });
-    const now = Date.now();
-    if (rateConfig !== undefined || (account.rateLimitedUntil ?? 0) > now) {
-      const retryAfterSeconds = readNumberParam(rateConfig, 'retryAfterSeconds') ?? 30;
-      account.rateLimitedUntil = now + retryAfterSeconds * 1000; // 计时重置
+    // 429 RATE_LIMITED（gw-6）：期内任何 send 再 429 且**计时重置**（REQ §2.1；判定+重置在 outbound.ts）
+    const rateLimited = rateLimitRejection(state, accountId);
+    if (rateLimited !== null) {
       return reply.code(429).send({
         code: 'RATE_LIMITED',
         message: 'account is rate limited',
-        retryAfterSeconds,
+        retryAfterSeconds: rateLimited.retryAfterSeconds,
       });
     }
 
     const sendTarget = { groupId, accountId, clientMsgId };
 
-    // 504 NETWORK_TIMEOUT 两态（开关 7/8，DES/14 §5）
-    if (activeSwitch(state, 'send_504_not_sent', sendTarget) !== undefined) {
-      return reply.code(504).send({ code: 'NETWORK_TIMEOUT', message: 'send result unknown' });
-    }
-    const landConfig = activeSwitch(state, 'send_504_land_1500', sendTarget);
-    if (landConfig !== undefined) {
-      // 504 但已被接收：契约 2s 内落地并推 message_sent（S5 编排 1.5s）
-      setTimeout(() => {
-        landMessage(state, groupId, account.platformUserId, clientMsgId, text);
-      }, SEND504_LAND_MS).unref();
+    // 504 NETWORK_TIMEOUT 两态（gw-7 已被接收 → 1.5s 后落地；gw-8 确实未发出 → by-client-id 恒 404）
+    const timeout = resolveSendTimeout(state, sendTarget);
+    if (timeout !== 'none') {
+      if (timeout === 'land_after_1500') {
+        setTimeout(() => {
+          landMessage(state, groupId, account.platformUserId, clientMsgId, text, origin, sendTarget);
+        }, SEND504_LAND_MS).unref();
+      }
       return reply.code(504).send({ code: 'NETWORK_TIMEOUT', message: 'send result unknown' });
     }
 
-    // 403 群不可写（开关 14：解散/禁言，按群注入）
-    if (activeSwitch(state, 'group_write_forbidden', { groupId }) !== undefined) {
+    // 403 群不可写（gw-14：解散/禁言，按群注入；与账号无关）
+    if (isGroupWriteForbidden(state, group, groupId)) {
       return reply.code(403).send({ code: 'GROUP_WRITE_FORBIDDEN', message: 'group is not writable' });
     }
-    // 403 发送者不在群：自然语义 + 开关 16 强制注入
-    if (!group.members.has(account.platformUserId) || activeSwitch(state, 'sender_not_in_group', sendTarget)) {
+    // 403 发送者不在群：自然语义 + gw-16 强制注入（对真成员也回同码）
+    if (!group.members.has(account.platformUserId) || isForcedSenderNotInGroup(state, sendTarget)) {
       return reply.code(403).send({ code: 'SENDER_NOT_IN_GROUP', message: 'sender is not in this group' });
     }
 
     // 受理：202 本身可能 1–2s（gw-1 钉值或区间随机）；message_sent 在 202 之后再计时（gw-2）
     const acceptDelay = resolveSendAcceptDelayMs(state, sendTarget);
     const senderPuid = account.platformUserId;
-    const failureCode = readStringParam(activeSwitch(state, 'message_failed_event', sendTarget), 'code');
+    const failureCode = resolveMessageFailedCode(state, sendTarget); // gw-15（两闭集码，arrange 时已校验）
     const landDelay = resolveMessageSentDelayMs(state, sendTarget);
     // 两段独立计时（DES/14 §3）：先 await 慢回 202（占住请求），落地在 202 后 landDelay
     await waitMs(acceptDelay);
     reply.code(202).send({ accepted: true });
     setTimeout(() => {
-      if (failureCode === 'GROUP_WRITE_FORBIDDEN' || failureCode === 'ACCOUNT_SUSPENDED') {
-        // message_failed 两闭集码（REQ §2.1）；不落地、不推 message
+      if (failureCode !== undefined) {
+        // message_failed（REQ §2.1）：不落地、不推 message
         appendLedger(state, 'message_failed', { clientMsgId, code: failureCode });
         return;
       }
-      landMessage(state, groupId, senderPuid, clientMsgId, text);
+      landMessage(state, groupId, senderPuid, clientMsgId, text, origin, sendTarget);
     }, landDelay).unref();
   });
 
-  // GET /groups/:groupId/messages/by-client-id/:clientMsgId → 200 {msgId, sentAt} 最早一条 / 404（REQ §2.1）
+  // GET /groups/:groupId/messages/by-client-id/:clientMsgId → 200 {msgId, sentAt} 最早一条 / 404 / 503（REQ §2.1）
   app.get('/groups/:groupId/messages/by-client-id/:clientMsgId', async (request, reply) => {
     const { groupId, clientMsgId } = request.params as { groupId: string; clientMsgId: string };
+    // gw-9：查询本身可整体不可用（REQ §2.1「任何端点（包括 by-client-id 查询）都可能 503」）。
+    // 503 判定先于 404：网关不可用时连「有没有这条」都无从回答——server 侧因此保持 unknown 而不判未发出。
+    if (isByClientIdOutage(state, { groupId, clientMsgId })) {
+      return reply.code(503).send(UNAVAILABLE_BODY);
+    }
     if (!state.groups.has(groupId)) {
       return reply.code(404).send({ message: `unknown group: ${groupId}` });
     }
@@ -234,20 +246,27 @@ export function registerMessagingRoutes(app: FastifyInstance, state: GatewayStat
   });
 }
 
-/** 落地一条消息：分配 msgId/sentAt、入有序列表、推 message_sent + message（全量回流，S3） */
+/**
+ * 落地一条消息：分配 msgId/sentAt、入有序列表、推 message_sent + message（全量回流，S3）。
+ * gw-27 `media_message` 命中时（判定在**落地时刻**，故 send 之后再 arm 也生效）：建媒体对象并在
+ * message 事件带绝对 mediaUrl；`GET /media/:id` 返回字节，`media_expire_404` 命中后 404（REQ §2.1）。
+ */
 function landMessage(
   state: GatewayState,
   groupId: string,
   senderPuid: string,
   clientMsgId: string,
   text: string,
+  origin: string,
+  target: SwitchTarget,
 ): void {
   if (!state.groups.has(groupId)) {
     return; // 受理与落地之间群已消失（reset/删除）：不落地不推帧
   }
   const msgId = `m-${++state.msgSeq}`;
   const sentAt = new Date().toISOString(); // 毫秒精度；同一毫秒可能多条（REQ §2.1）
-  const row: MockMessageRecord = { groupId, senderPuid, msgId, text, sentAt, landed: true };
+  const mediaUrl = isMediaMessageEnabled(state, target) ? attachMedia(state, msgId, origin) : undefined;
+  const row: MockMessageRecord = { groupId, senderPuid, msgId, text, sentAt, landed: true, mediaUrl };
   const rows = state.messages.get(clientMsgId);
   if (rows === undefined) {
     state.messages.set(clientMsgId, [row]);
@@ -257,5 +276,12 @@ function landMessage(
   state.counters.landedMessages += 1;
   appendLedger(state, 'message_sent', { clientMsgId, msgId, sentAt });
   // 网关不区分消息来自谁：自己的消息同样推 message（S3 默认行为，非开关——DES/14 §5 注）
-  appendLedger(state, 'message', { groupId, msgId, senderPlatformUserId: senderPuid, text, sentAt });
+  appendLedger(state, 'message', {
+    groupId,
+    msgId,
+    senderPlatformUserId: senderPuid,
+    text,
+    sentAt,
+    ...(mediaUrl === undefined ? {} : { mediaUrl }),
+  });
 }
