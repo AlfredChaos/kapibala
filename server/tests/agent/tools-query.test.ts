@@ -49,7 +49,7 @@ describe('get_recent_messages（DES/06 §7.1 / QR §1）', () => {
     const parsed = JSON.parse(res.content) as { messages: Array<{ text: string; sentAt: string }>; truncated: boolean };
     expect(parsed.truncated).toBe(false);
     expect(parsed.messages.map((m) => m.text)).toEqual(['first', 'second', 'third (arrived mid-run)']); // sentAt 升序
-    expect(parsed.messages[0]?.sentAt < (parsed.messages[2]?.sentAt ?? '')).toBe(true);
+    const s0 = parsed.messages[0]?.sentAt ?? ''; const s2 = parsed.messages[2]?.sentAt ?? ''; expect(s0 !== '' && s0 < s2).toBe(true);
   });
 
   it('limit=min(limit,50)：>50 钳制不报错（ag-11；§7.1 逐字「超过按 50 处理」）', async () => {
