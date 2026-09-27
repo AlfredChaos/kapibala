@@ -30,6 +30,7 @@ import { tx } from '../../db/tx.js';
 import type { GatewayClient } from '../../gateway/client.js';
 import { GatewayError } from '../../gateway/errors.js';
 import { checkRateLimit, registerRateLimit } from '../accounts/rate-limit.js';
+import { applyGroupUnreachableCascade } from '../groups/state.js';
 import { enterTerminal } from '../accounts/terminal.js';
 import { notifyWsEventCommitted } from '../../ws/notify.js';
 import type { AccountTerminalStatus } from '@kapibala/contract';
@@ -63,37 +64,6 @@ interface QueuedMessage {
   readonly client_msg_id: string;
   readonly group_id: string;
   readonly text: string;
-}
-
-/** markGroupUnreachable 事务结果（写回 + 帧生成共用） */
-interface GroupCascade {
-  readonly becameUnreachable: boolean;
-  readonly stoppedRuns: ReadonlyArray<{ id: string; current_step_index: number }>;
-}
-
-/**
- * GROUP_WRITE_FORBIDDEN 级联（DES/04 §5 单事务逐字）：
- * group.status='unreachable'（WHERE status='active' 幂等）→ running 序列 → stopped +
- * ws_event(sequence_run)（每 run 一帧）→ agent run 协作式取消由执行器循环顶检查点查群态
- * 完成（schema 无取消标志列；§06 §10 检查点读库即可）→ 账号不触碰。
- * 返回 stoppedRuns 供调用方生成 sequence_run 帧。
- */
-async function applyGroupUnreachableCascade(
-  client: PoolClient,
-  groupId: string,
-): Promise<GroupCascade> {
-  const g = await client.query(
-    `UPDATE "group" SET status='unreachable', updated_at=now()
-     WHERE id=$1 AND status='active'`,
-    [groupId],
-  );
-  const stopped = await client.query<{ id: string; current_step_index: number }>(
-    `UPDATE sequence_run SET status='stopped', ended_at=now(), updated_at=now()
-     WHERE group_id=$1 AND status='running'
-     RETURNING id, current_step_index`,
-    [groupId],
-  );
-  return { becameUnreachable: g.rowCount !== 0, stoppedRuns: stopped.rows };
 }
 
 async function insertWsEvent(client: PoolClient, type: string, payload: unknown): Promise<void> {
