@@ -728,7 +728,7 @@
   d) 静态转移表与 server transitions.ts 语义一致（对照测试）；无 any
   e) 矩阵 A6（页面 2）登记应勾
 
-### T-P5-04 群详情页骨架（页面 3）            [status: TODO]
+### T-P5-04 群详情页骨架（页面 3）            [status: DONE]
 - goal: 成员列表（含 role）、agentEnabled/autoKickEnabled 开关（viewer 只读）、发送表单（选账号 + text 前端校验）、agent run 区块（最近列表 + blocked 醒目横幅）、页面 3 整体数据流。
 - refs: DES/15-web-console.md §2 页面 3；DES/04-group-module.md §5；REQ §4 页面 3
 - owned: web/src/pages/GroupDetailPage.tsx、web/src/components/GroupMembers.tsx、web/src/components/SendForm.tsx、web/src/components/AgentRunList.tsx、web/tests/group-page.test.tsx

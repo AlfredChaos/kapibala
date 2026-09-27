@@ -233,6 +233,14 @@
 - 踩坑：① happy-dom + React 18 受控组件：select 用原生 value setter+change、input 用原生 setter+input——React 18 内部 tracker 不认直接 .value 赋值；② StrictMode 双挂载会创建两个 FakeSocket（cleanup 断第一个）——断言用 lastSocket()；③ hashline edit 又一次锚错位（viewer 测试开头被覆盖）——长多行 PUT 必须逐次回读。
 - VITEST 登记：A6（页面 2）应勾——00-SPEC.md 矩阵行已登记（勾选状态阶段门维护）。
 
+
+## 2026-09-28 T-P5-04 A6 页面 3：群详情页骨架
+- 做了什么：`web/src/lib/api-types.ts`（GroupView/GroupMemberView/AgentRunView DTO 镜像——与 server modules/groups|agent/query.ts 输出逐字同名）+ `lib/text-limits.ts`（TEXT_MAX_LENGTH=2000 镜像 + validateSendText 纯函数——同源校验直接 import server constants）+ `components/GroupMembers.tsx`（accountId/platformUserId/role 三列，服务端 §5 排序不重排）+ `components/SendForm.tsx`（选成员账号 + text；非空/超 2000 前端先拦——提交禁用+role=alert 校验文案双通道；合法 → POST /api/groups/:id/send → clientMsgId 回执；members 空/提交中禁用）+ `components/AgentRunList.tsx`（run 列表；blocked 行 data-blocked+红底红边——页面 3 逐字「醒目提示」的行级半边）+ `pages/GroupDetailPage.tsx`（/groups/:id：GET 群详情+GET agent-runs 首屏；blocked run>0 → 顶部横幅 role=alert；agentEnabled/autoKickEnabled checkbox PATCH——admin 可写、viewer disabled 只读；WS group_updated→就地 setGroup patch（§2.3 事件携带新值，DES/15 注释逐字）、agent_run→已知行就地 patch/未知 runId 重拉）+ router.tsx 挂 /groups/:id。
+- 验证命令与输出摘录：先红后绿——WS 测试首跑红（agent-runs fetch 4 次 vs 预期 3 次：StrictMode 双调 setState updater，updater 里的 reloadRuns 副作用跑两遍）；副作用移出 updater 后 `cd web && npx vitest run tests/group-page.test.tsx` → **6/6**：成员 role 三行；开关 admin 可写值正确 + blocked 横幅存在 + data-blocked 仅 run-1；发送表单空→禁用、2001 字→校验文案「2001/2000」+禁用、合法→POST body{accountId:'a-1',text} + clientMsgId 回执；WS group_updated→开关就地翻转、agent_run 已知行 patch（横幅消失）+未知 run→重拉一次；viewer 开关 disabled+无表单+PATCH→403。全量 31/31；tsc/eslint/build 全绿。
+- 偏差与【解读】：① 「开关 viewer 只读」按 checkbox disabled 实现（可见不可动）——REQ §4「看不到写操作按钮」语义上开关是状态展示+控制复合体，只读=disabled 比不渲染更贴合「显示状态」；写权限服务端仍 403 权威；② agent_run 已知行就地 patch、未知 runId 才重拉（避免 WS 增量退化成整页轮询——页面 3「WS 原地更新」精神）；③ 时间线区刻意不做——T-P5-05 卡片专属，本页只留骨架区块位。
+- 踩坑：① React 18 setState updater 在 StrictMode 下被双调——updater 内放副作用（重拉）会双倍执行；副作用必须在 updater 外（ref 转发的 useWsEvent handler 每次渲染读最新 state，无闭包旧值问题）；② hashline edit 再次在嵌套回调块中间切错锚点（useWsEvent 被缝进 toggle 的 try 块）——连续三次长 PUT 错位后改用 python 整段替换；③ React 受控 textarea 需原生 value setter + input 事件（与 select 的 change 不同）。
+- VITEST 登记：A6（页面 3）应勾——00-SPEC.md 矩阵行已登记（勾选状态阶段门维护）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
