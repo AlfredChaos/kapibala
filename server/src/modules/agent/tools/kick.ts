@@ -141,3 +141,24 @@ export async function execKickUser(
     return errResult('SEND_FAILED', `gateway ${err.code} (HTTP ${err.status})`);
   }
 }
+
+/**
+ * T-P4-11 恢复用（§9.2 kick_user 行逐字）：崩溃于 tool_dispatched 时按 kick_target 反查
+ * 成员列表——目标不在 -> {kicked:true}；在 -> 失败 tool_result。「不重放不记失败」（A5-8）。
+ * 同 §8.5 RECHECK：先等 2s 收敛窗再查列表（成员列表读「任意时刻」）。
+ */
+export async function recoverKickOutcome(
+  opts: { groupId: string; kickTarget: string },
+  deps: KickDeps,
+): Promise<ToolOutcome> {
+  await (deps.convergeWait ?? (() => new Promise<void>((r) => setTimeout(r, KICK_CONVERGE_MS))))();
+  const { rows } = await deps.pool.query<{ gateway_group_id: string | null }>(
+    `SELECT gateway_group_id FROM "group" WHERE id=$1`, [opts.groupId]);
+  const gwGroupId = rows[0]?.gateway_group_id;
+  if (gwGroupId === null || gwGroupId === undefined) {
+    return errResult('SEND_FAILED', 'group has no gateway id');
+  }
+  const members = await deps.gateway.members(gwGroupId).catch(() => [] as { platformUserId: string }[]);
+  const stillMember = members.some((m) => m.platformUserId === opts.kickTarget);
+  return stillMember ? errResult('SEND_FAILED', KICK_504_MESSAGE) : kickedResult();
+}

@@ -39,8 +39,8 @@ import {
 import { startAgentRun } from './trigger.js';
 import { execGetRecentMessages } from './tools/query.js';
 import { execFinish } from './tools/finish.js';
-import { execSendMessage, sendMessagePreAudit, type DeliveryWaiter } from './tools/send-message.js';
-import { execKickUser, kickPreAudit } from './tools/kick.js';
+import { execSendMessage, sendMessagePreAudit, recoverSendOutcome, type DeliveryWaiter } from './tools/send-message.js';
+import { execKickUser, kickPreAudit, recoverKickOutcome } from './tools/kick.js';
 import type { GatewayClient } from '../../gateway/client.js';
 
 
@@ -242,43 +242,118 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
       }
       const run = pre.run;
       if (run === undefined) return;
-      const seq = run.step_count + 1;
 
-      // 步 1：意图先行——step 先 turn_dispatched 带请求快照（E11），之后才发 HTTP
-      const messages = await tx(deps.pool, (c) => rebuildMessages(c, run));
-      const request: AgentTurnRequest = { runId, tools: AGENT_TOOLS, messages };
-      await tx(deps.pool, (c) =>
-        c.query(
-          `INSERT INTO agent_run_step (run_id, seq, kind, status, dispatch_payload, appended_blocks)
-           VALUES ($1, $2, 'tool_use', 'turn_dispatched', $3::jsonb, '[]'::jsonb)`,
-          [runId, seq, JSON.stringify(request)],
-        ),
-      );
+      // ---- 恢复分支（§9.1 逐字）：最后一个未完成 step 的 status 决定断点续法 ----
+      const pending = await tx(deps.pool, async (c) => {
+        const { rows } = await c.query<{
+          seq: number; status: string; dispatch_payload: unknown;
+          raw_response: string | null; tool_use_id: string | null; name: string | null;
+          client_msg_id: string | null; kick_target: string | null;
+        }>(
+          `SELECT seq, status, dispatch_payload, raw_response, tool_use_id, name, client_msg_id, kick_target
+           FROM agent_run_step WHERE run_id=$1 AND status<>'done' ORDER BY seq DESC LIMIT 1`,
+          [runId],
+        );
+        return rows[0];
+      });
 
-      // 步 2：HTTP（agentclient 传输层 AbortController 到时取消 → TURN_TIMEOUT）
+      let seq: number;
+      let request: AgentTurnRequest;
       let rawRes: AgentRawResponse | undefined;
+      let turn: AgentTurnResponse | undefined;
       let errCode: 'BAD_JSON' | 'TURN_TIMEOUT' | null = null;
       let errRaw: string | null = null;
-      try {
-        rawRes = await deps.agentClient.rawTurn(request);
-      } catch (err) {
-        if (err instanceof AgentClientError) {
-          errCode = err.protocolErrorCode;
-          errRaw = err.rawBody ?? null;
+      let resumeReceived = false;
+
+      if (pending?.status === 'tool_dispatched') {
+        // 效果型工具意图已落：反查外部现状，绝不重放（§9.1 TOOLKIND 分支逐字）
+        seq = pending.seq;
+        let recovered: ToolOutcome;
+        if (pending.name === 'send_message' && pending.client_msg_id !== null) {
+          recovered = await recoverSendOutcome(pending.client_msg_id, {
+            pool: deps.pool, waiter: deps.deliveryWaiter,
+          });
+        } else if (pending.name === 'kick_user' && pending.kick_target !== null && deps.gateway !== undefined) {
+          recovered = await recoverKickOutcome(
+            { groupId: run.group_id, kickTarget: pending.kick_target },
+            { pool: deps.pool, gateway: deps.gateway, convergeWait: deps.kickConvergeWait },
+          );
         } else {
-          errCode = 'TURN_TIMEOUT';
+          // 凭据缺失（旧数据/未知工具）→ 按 SEND_FAILED 收敛（X-1 表内码）
+          recovered = { type: 'result', content: JSON.stringify({ code: 'SEND_FAILED', message: 'recovery: missing dispatch credential' }), isError: true };
         }
+        const assistant = pending.tool_use_id !== null && pending.name !== null
+          ? [{ role: 'assistant', content: [{ type: 'tool_use', id: pending.tool_use_id, name: pending.name, input: null }] }]
+          : [];
+        const recContent = recovered.type === 'result' ? recovered.content : '{}';
+        let recCode: string | undefined;
+        try { const c = (JSON.parse(recContent) as { code?: string }).code; recCode = typeof c === 'string' ? c : undefined; } catch { /* 非 JSON 内容留空 */ }
+        await appendToolResult(runId, seq, pending.tool_use_id ?? '', assistant, {
+          content: recContent,
+          isError: recovered.type === 'result' ? (recovered.isError ?? false) : true,
+          errorCode: recCode,
+          resultSummary: recovered.type === 'result' ? recovered.resultSummary : undefined,
+        });
+        continue;
       }
 
-      let turn: AgentTurnResponse | undefined;
-      if (errCode === null && rawRes !== undefined) {
-        // 三段式校验（validation.ts 唯一收口；HTTP 状态/JSON/形状三层同码 BAD_JSON）
+      if (pending?.status === 'turn_received') {
+        // 响应已落库未处理完：从 raw_response 续推进（§9.1 REPROC）
+        seq = pending.seq;
+        resumeReceived = true;
+        rawRes = { status: 200, raw: pending.raw_response ?? '' };
         const v = validateTurnResponse(rawRes);
-        if (!v.ok) {
-          errCode = 'BAD_JSON';
-          errRaw = rawRes.raw;
-        } else {
+        if (v.ok) {
           turn = v.response;
+        } else {
+          errCode = 'BAD_JSON';
+          errRaw = pending.raw_response;
+        }
+        request = pending.dispatch_payload as AgentTurnRequest; // 仅供后续语义，未再发
+      } else if (pending?.status === 'turn_dispatched') {
+        // 响应未知：用 dispatch_payload 快照重发同轮（同 runId；§12 无状态全量历史语义）
+        seq = pending.seq;
+        request = pending.dispatch_payload as AgentTurnRequest;
+        try {
+          rawRes = await deps.agentClient.rawTurn(request);
+        } catch (err) {
+          if (err instanceof AgentClientError) {
+            errCode = err.protocolErrorCode;
+            errRaw = err.rawBody ?? null;
+          } else {
+            errCode = 'TURN_TIMEOUT';
+          }
+        }
+        if (errCode === null && rawRes !== undefined) {
+          const v = validateTurnResponse(rawRes);
+          if (!v.ok) { errCode = 'BAD_JSON'; errRaw = rawRes.raw; } else { turn = v.response; }
+        }
+      } else {
+        // ---- 新步（步 1：意图先行——step 先 turn_dispatched 带请求快照，E11）----
+        seq = run.step_count + 1;
+        const messages = await tx(deps.pool, (c) => rebuildMessages(c, run));
+        request = { runId, tools: AGENT_TOOLS, messages };
+        await tx(deps.pool, (c) =>
+          c.query(
+            `INSERT INTO agent_run_step (run_id, seq, kind, status, dispatch_payload, appended_blocks)
+             VALUES ($1, $2, 'tool_use', 'turn_dispatched', $3::jsonb, '[]'::jsonb)`,
+            [runId, seq, JSON.stringify(request)],
+          ),
+        );
+        // 步 2：HTTP（agentclient 传输层 AbortController 到时取消 → TURN_TIMEOUT）
+        try {
+          rawRes = await deps.agentClient.rawTurn(request);
+        } catch (err) {
+          if (err instanceof AgentClientError) {
+            errCode = err.protocolErrorCode;
+            errRaw = err.rawBody ?? null;
+          } else {
+            errCode = 'TURN_TIMEOUT';
+          }
+        }
+        if (errCode === null && rawRes !== undefined) {
+          const v = validateTurnResponse(rawRes);
+          if (!v.ok) { errCode = 'BAD_JSON'; errRaw = rawRes.raw; } else { turn = v.response; }
         }
       }
 
@@ -290,7 +365,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
             seq,
             code: errCode ?? 'TURN_TIMEOUT',
             rawResponse: errRaw,
-            stepCounted: false,
+            stepCounted: resumeReceived, // turn_received 已计步
           }),
         );
         if (streakHit) {
@@ -304,19 +379,21 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
       }
 
       // 步 3：合法形状响应 → turn_received + raw_response（≤2KB）+ streak 清零
-      const received = await tx(deps.pool, async (client) => {
-        const { rowCount } = await client.query(
-          `UPDATE agent_run_step SET status='turn_received', raw_response=$3, updated_at=now()
-           WHERE run_id=$1 AND seq=$2 AND status='turn_dispatched'`,
-          [runId, seq, clipRawResponse(rawRes?.raw)],
-        );
-        if (rowCount !== 1) return false;
-        await client.query(
-          `UPDATE agent_run SET protocol_error_streak=0, step_count=step_count+1, updated_at=now() WHERE id=$1`,
-          [runId],
-        );
-        return true;
-      });
+      const received = resumeReceived
+        ? true // 续推进：本步计步/streak 在崩溃前的 turn_received 事务已完成
+        : await tx(deps.pool, async (client) => {
+            const { rowCount } = await client.query(
+              `UPDATE agent_run_step SET status='turn_received', raw_response=$3, updated_at=now()
+               WHERE run_id=$1 AND seq=$2 AND status='turn_dispatched'`,
+              [runId, seq, clipRawResponse(rawRes?.raw)],
+            );
+            if (rowCount !== 1) return false;
+            await client.query(
+              `UPDATE agent_run SET protocol_error_streak=0, step_count=step_count+1, updated_at=now() WHERE id=$1`,
+              [runId],
+            );
+            return true;
+          });
       if (!received) continue; // 晚到响应丢弃（该轮已按 TURN_TIMEOUT 落库）
 
       if (turn.stopReason === 'end_turn') {

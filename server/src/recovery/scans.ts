@@ -4,6 +4,7 @@
 // 任务在其扩展点插入（T-P4-11 = agent 段、T-P6-04 = 序列段等，见各 stub 注释）；
 // 插入时保持本清单顺序不变（boot-order.test.ts 钉死名单与次序）。
 // 宪法 §3-5：扫描体必须全部条件更新、可重复触发（幂等吸收）——本骨架不含任何进程内正确性判定。
+import { recoverAgentRuns } from '../modules/agent/recovery.js';
 import type { Pool } from 'pg';
 import { retryDeadLettersOnce } from '../events/deadletter.js';
 import { runAccountsRecoveryScan } from '../modules/accounts/transitions.js';
@@ -71,10 +72,10 @@ export const RECOVERY_SCANS: readonly RecoveryScan[] = [
     // 扫描 2：agent_run WHERE status='running'——advisory lock 抢占，按 step.status 断点续传
     // （done→预算判定续轮 / turn_dispatched→快照重发同轮 / turn_received→续推进 /
     // tool_dispatched→反查外部现状不重发）；wall_deadline_at = now + 剩余预算（DES/06 §9）。
-    // 【扩展点：T-P4-11（agent 段充实，共享串行文件）】
+    // 【扩展点：T-P4-11（agent 段充实，共享串行文件）】已接线
     name: 'agent-runs',
-    async run() {
-      return 0;
+    async run(deps) {
+      return recoverAgentRuns({ pool: deps.pool });
     },
   },
   {

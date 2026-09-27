@@ -200,3 +200,28 @@ export async function execSendMessage(
   );
   return deliveryOutcome(clientMsgId, settled?.delivery_status ?? 'queued', settled?.fail_code ?? null);
 }
+
+/**
+ * T-P4-11 恢复用（§9.2 send_message 行逐字）：崩溃于 tool_dispatched 时按 client_msg_id
+ * 反查 message 现状生成 tool_result——queued（等待）、sent（成功）、unknown（随判定器等收敛）。
+ * **绝不二次创建消息**：唯一凭据是 step.client_msg_id + message 行（幂等 key 行已在）。
+ */
+export async function recoverSendOutcome(
+  clientMsgId: string,
+  deps: { pool: Pool; waiter?: DeliveryWaiter },
+): Promise<ToolOutcome> {
+  const { rows } = await deps.pool.query<{ delivery_status: string; fail_code: string | null }>(
+    `SELECT delivery_status, fail_code FROM message WHERE client_msg_id=$1`,
+    [clientMsgId],
+  );
+  let status = rows[0]?.delivery_status ?? 'unknown';
+  let failCode = rows[0]?.fail_code ?? null;
+  if (status !== 'sent' && status !== 'failed') {
+    const settled = await (deps.waiter ?? defaultDeliveryWaiter)(deps.pool, clientMsgId, SEND_MESSAGE_DELIVERY_WAIT_MS);
+    if (settled !== undefined) {
+      status = settled.delivery_status ?? 'unknown';
+      failCode = settled.fail_code;
+    }
+  }
+  return deliveryOutcome(clientMsgId, status, failCode);
+}
