@@ -27,6 +27,7 @@ import type { AgentClient, AgentMessage, AgentTurnRequest, AgentTurnResponse } f
 import { AgentClientError } from '../../agentclient/index.js';
 import type { AgentRawResponse } from '../../agentclient/index.js';
 import { checkBudget } from './budget.js';
+import { auditTextForTool, isEffectTool, runAuditGate } from './audit.js';
 import { endAgentRun } from './end-run.js';
 import { AGENT_TOOLS, AGENT_TOOL_NAMES } from './tools-def.js';
 import { validateTurnResponse, validateToolInput } from './validation.js';
@@ -378,6 +379,65 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
           [runId, seq, tool.id, tool.name, JSON.stringify(tool.input ?? null)],
         ),
       );
+
+      // 效果型工具先过审计门禁（§8.1：send_message/kick_user 执行前必经 /agent/audit）；
+      // 审计 pass 后才落 tool_dispatched 意图（§3 第 3 条次序：意图落库在执行前、审计后）
+      if (isEffectTool(tool.name)) {
+        const auditText = auditTextForTool(tool.name, tool.input);
+        if (auditText === undefined) {
+          await tx(deps.pool, (c) =>
+            appendToolErrorResult(c, {
+              runId, seq, toolUseId: tool.id, toolName: tool.name, input: tool.input,
+              code: 'INVALID_INPUT', message: 'missing audit payload field',
+            }),
+          );
+          continue;
+        }
+        const verdict = await runAuditGate(
+          { agentClient: deps.agentClient, groupId: run.group_id, wallDeadlineAt: run.wall_deadline_at },
+          auditText,
+        );
+        if (verdict === 'rejected') {
+          // AUDIT_REJECTED：is_error tool_result、run 继续、key 不消耗（不落幂等表）；
+          // audit_verdict='fail' 同步落库（§3 时序框 verdict=fail 分支逐字）
+          await tx(deps.pool, async (c) => {
+            await c.query(
+              `UPDATE agent_run_step SET audit_verdict='fail' WHERE run_id=$1 AND seq=$2`,
+              [runId, seq],
+            );
+            await appendToolErrorResult(c, {
+              runId, seq, toolUseId: tool.id, toolName: tool.name, input: tool.input,
+              code: 'AUDIT_REJECTED', message: 'audit verdict: fail',
+            });
+          });
+          continue;
+        }
+        if (verdict === 'blocked' || verdict === 'wall_clock') {
+          // 3 次无结论 → blocked/audit_blocked；重试中途墙钟到期 → wall_clock（§12 风险 2）
+          const end = await tx(deps.pool, async (client) => {
+            await client.query(
+              `UPDATE agent_run_step SET status='done', audit_verdict='unresolved', updated_at=now()
+               WHERE run_id=$1 AND seq=$2`,
+              [runId, seq],
+            );
+            return endAgentRun(client, {
+              runId,
+              status: verdict === 'blocked' ? 'blocked' : 'failed',
+              endReason: verdict === 'blocked' ? 'audit_blocked' : 'wall_clock',
+            });
+          });
+          if (end.nextRunId !== undefined) startAgentRun(end.nextRunId);
+          return;
+        }
+        // pass：工具执行意图落库（§3 第 3 条；audit_verdict='pass' 同行）
+        await tx(deps.pool, (c) =>
+          c.query(
+            `UPDATE agent_run_step SET status='tool_dispatched', audit_verdict='pass', updated_at=now()
+             WHERE run_id=$1 AND seq=$2`,
+            [runId, seq],
+          ),
+        );
+      }
 
       if (tool.name === 'finish') {
         const input = tool.input as Record<string, unknown> | undefined;

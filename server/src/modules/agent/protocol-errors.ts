@@ -72,7 +72,7 @@ export async function recordProtocolErrorStep(
  */
 export async function appendToolErrorResult(
   client: PoolClient,
-  args: { runId: string; seq: number; toolUseId: string; toolName: string; input: unknown; code: 'UNKNOWN_TOOL' | 'INVALID_INPUT'; message: string },
+  args: { runId: string; seq: number; toolUseId: string; toolName: string; input: unknown; code: 'UNKNOWN_TOOL' | 'INVALID_INPUT' | 'AUDIT_REJECTED'; message: string },
 ): Promise<void> {
   const blocks = [
     { role: 'assistant', content: [{ type: 'tool_use', id: args.toolUseId, name: args.toolName, input: args.input ?? null }] },
