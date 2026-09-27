@@ -71,6 +71,9 @@ importers:
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      mock-gateway:
+        specifier: workspace:*
+        version: link:../mock-gateway
 
   web:
     dependencies:

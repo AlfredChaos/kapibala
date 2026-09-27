@@ -20,6 +20,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.23.1"
+    "@types/pg": "^8.23.1",
+    "mock-gateway": "workspace:*"
   }
 }
