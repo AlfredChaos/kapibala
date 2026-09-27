@@ -205,7 +205,7 @@ export function startOutboundDispatcher(options: OutboundDispatcherOptions): Out
                             unknown_since=now(),
                             unknown_deadline_at=now() + $2 * interval '1 millisecond',
                             updated_at=now()
-         WHERE id=$1 AND delivery_status='queued' AND first_attempt_at IS NULL`,
+         WHERE id=$1 AND delivery_status='queued' AND first_attempt_at IS NOT NULL`,
         [msg.id, UNKNOWN_SETTLE_MS],
       );
       if (rowCount === 1) {
@@ -221,7 +221,7 @@ export function startOutboundDispatcher(options: OutboundDispatcherOptions): Out
       // 复位先于登记提交：任一失败都不留下「尝试过但未发」的假阳性（A2：429 = 确认未发出）
       await client.query(
         `UPDATE message SET first_attempt_at=NULL, updated_at=now()
-         WHERE id=$1 AND delivery_status='queued' AND first_attempt_at IS NULL`,
+         WHERE id=$1 AND delivery_status='queued' AND first_attempt_at IS NOT NULL`,
         [msg.id],
       );
     });

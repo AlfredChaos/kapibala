@@ -849,7 +849,7 @@
   d) 弹窗美化属可裁剪装饰（保留 422 的 stepIndex/key 展示，裁剪预案）；无 any
   e) 矩阵 B1（页面半边）登记应勾
 
-### T-P6-08 集成：S7/S8 场景 + B4 断线补齐验收（串行汇合点）            [status: TODO]
+### T-P6-08 集成：S7/S8 场景 + B4 断线补齐验收（串行汇合点）            [status: DONE]
 - goal: `tests/scenarios/s7.test.ts`（并发启动）、`tests/scenarios/s8.test.ts`（预检）+ demo 脚本 + B4 断线 3s 补齐端到端验收用例。
 - refs: REQ §2.4 S7/S8、§3 B4；DES/07 §7；VITEST_PLAN §2
 - owned: server/tests/scenarios/s7.test.ts、s8.test.ts、server/tests/ws/backfill-e2e.test.ts、scripts/demo/s7.ts、s8.ts

@@ -265,6 +265,14 @@
 - 踩坑：① happy-dom/React 受控元素：直接 el.value=+change 无效——必须 native prototype setter + input 事件（textarea/input）/change（select）；② ApiError 原先丢 extra（envelope 合并业务字段但 client 只取 code/message）→ 透出 `extra`；③ happy-dom 不行内解析 `border` shorthand 到 borderColor/cssText——行内高亮断言改用语义标记（launch-hit-<i> 在行内）而非 style 文本；④ StrictMode 双 effect 多拉详情→重拉断言用差值；⑤ 测试禁 non-null `!`——`must()`/`el()` helper + querySelector 泛型写在内侧。
 - VITEST 登记：B1（页面半边）应勾（00-SPEC.md 已登记）。
 
+
+## 2026-09-28 T-P6-08 S7/S8 场景 + B4 断线补齐端到端（P6 汇合点）
+- 做了什么：`tests/scenarios/s7.test.ts`（同群并发两次 POST sequence-runs → 恰一 201 一 409 SEQUENCE_ALREADY_RUNNING；sequence_run running 恰一行——DB 部分唯一索引仲裁真值）+ `tests/scenarios/s8.test.ts`（step-3 {latecode} 未解析 → 422 error.code/stepIndex=3/key=latecode；counters.landedMessages=0 + sequence_run/step 行数 0 双真值；补齐 stepVars → 201 可启动）+ `tests/ws/backfill-e2e.test.ts`（真 WS socket：auth→实时收 msg(seq=N)→断线→注入两条 message（SSE→消费→ws_event 落库确认）→重连 auth sinceSeq=N→≤3s 两帧补齐 seq>N 独占、零重复+700ms 宽限无迟来重复）+ `scripts/demo/s7.ts`（5 checks PASS）+ `scripts/demo/s8.ts`（10 checks PASS）。
+- 验证命令与输出摘录：`npx vitest run tests/scenarios/s7.test.ts tests/scenarios/s8.test.ts tests/ws/backfill-e2e.test.ts` → 3/3 绿（4.56s）；`pnpm demo:s7` → `PASS s7 — 5 checks`（status=[201,409]）；`pnpm demo:s8` → `PASS s8 — 10 checks`。先红后绿说明：三用例均一次过绿——S7/S8/B4 的实现面（部分唯一索引仲裁、预检先于 INSERT、sinceSeq 补发+水位去重）已在前序卡落地，本卡是验收用例的覆盖登记（同 S1-S6 汇合测试的收敛性质），非红→绿开发。
+- 偏差与【解读】：① B4「3 秒内」计时从发出重连 auth 起算到收齐补发帧（QR §1 逐字「断线后 3 秒内」——可控段是重连→补齐，断线时长本身人为）；② B4 双重复断言两段式（立即查 + 700ms 宽限再查）覆盖「水位兜底兜住实时/补发交叠」；③ S7 用 fetch Promise.all 双发（同实例并发也由 DB 唯一索引仲裁——卡片逐字「恰好一个 201 一个 409」与部署形态无关）；④ step delay=3600 保 run 常驻 running 不占调度器发送路径。
+- 踩坑：① **it 默认 testTimeout=5s vs 场景环境启动 ~5s+**——三用例均报「Test timed out in 5000ms」挂在 startScenarioEnv（此前一次跑过纯属余量够），按 s6 逐字惯例补 `}, 60000)`；② 并行/重负载下 waitFor 放宽只对「等事件落库/实时帧」这类外部时延，≤3s 补发计时断言不放宽（契约本身）；③ **兄弟 T-P7-02 把 `first_attempt_at IS NULL` 守卫误加到 markUnknown/429 复位**（claimAttempt 先落 first_attempt_at，post-claim 永不命中 → 全错误路径楔住）→ 已改 `IS NOT NULL`（行被本尝试 claim 且仍 queued 才可写回），outbound-dispatcher/unknown-adjudicator/s4 恢复绿且 crash 测试不受影响（已与本主确认）。
+- VITEST 登记：S-07/S-08/B4-1（端到端）应勾；P6 阶段门演示记录 = 本条 + demo PASS 输出。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
