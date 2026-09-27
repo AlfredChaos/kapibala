@@ -1,0 +1,89 @@
+// 启动恢复六扫描（T-P2-02 骨架；清单与顺序逐字 DES/10 §3 汇总图）。
+// 顺序原则（DES/10 §3）：先恢复出站与运行中的编排（世界状态收敛），再恢复账号侧收口，最后开流量。
+// 本任务只落「登记 + 交接」的骨架：每个扫描体是 stub（恒返回 0 = 零工作项），真实扫描体由归属
+// 任务在其扩展点插入（T-P4-11 = agent 段、T-P6-04 = 序列段等，见各 stub 注释）；
+// 插入时保持本清单顺序不变（boot-order.test.ts 钉死名单与次序）。
+// 宪法 §3-5：扫描体必须全部条件更新、可重复触发（幂等吸收）——本骨架不含任何进程内正确性判定。
+import type { Pool } from 'pg';
+import type { GatewayClient } from '../gateway/client.js';
+
+/** 最小日志面（只用 info/error）：pino Logger 结构兼容，测试可用普通对象 fake */
+export interface RecoveryLogger {
+  info(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
+export interface RecoveryDeps {
+  readonly pool: Pool;
+  readonly logger: RecoveryLogger;
+  /** 扫描 5b「补调 disconnect」用（E10 收口）；client 自身不做业务决策（T-P2-01） */
+  readonly gateway: GatewayClient;
+}
+
+export interface RecoveryScan {
+  /** 清单名（日志与登记用；DES/10 §3 扫描 1–6） */
+  name: string;
+  /** 返回登记/交接的工作项数；stub 恒 0（D3-2：交接给常驻组件异步接管，不同步等完成） */
+  run(deps: RecoveryDeps): Promise<number>;
+}
+
+export const RECOVERY_SCANS: readonly RecoveryScan[] = [
+  {
+    // 扫描 1：出站消息 message WHERE delivery_status IN ('queued','unknown')——
+    // queued 且 first_attempt_at IS NULL → 交给出站 dispatcher 正常首发（从未尝试，安全）；
+    // queued 但尝试过（结果未知）→ 条件 UPDATE 转 unknown（unknown_since=now、deadline=now+5s，
+    // E7 崩溃窗口收口，DES/05 §2.4）；unknown 行 → 交判定器（探测节奏从恢复时刻起算）。
+    // 【扩展点：出站管线 / unknown 判定器归属任务（DES/05 §2）】
+    name: 'outbound-messages',
+    async run() {
+      return 0;
+    },
+  },
+  {
+    // 扫描 2：agent_run WHERE status='running'——advisory lock 抢占，按 step.status 断点续传
+    // （done→预算判定续轮 / turn_dispatched→快照重发同轮 / turn_received→续推进 /
+    // tool_dispatched→反查外部现状不重发）；wall_deadline_at = now + 剩余预算（DES/06 §9）。
+    // 【扩展点：T-P4-11（agent 段充实，共享串行文件）】
+    name: 'agent-runs',
+    async run() {
+      return 0;
+    },
+  },
+  {
+    // 扫描 3：sequence_run WHERE status='running'——链头判定四分支：在途消息→等落定；
+    // 未排期→等前驱；过期未创建→只重排链头（now+delay，其后全部 scheduled_at=NULL）；
+    // 未到期→保持（DES/07 §5）。
+    // 【扩展点：T-P6-04（序列段充实，共享串行文件）】
+    name: 'sequence-runs',
+    async run() {
+      return 0;
+    },
+  },
+  {
+    // 扫描 4：job WHERE status='running'——按 phase/context 续传
+    // （join/leave 不重发，查外部现状判定；DES/04）。
+    // 【扩展点：群模块 job 执行器归属任务（DES/04 §2.2/§3.2）】
+    name: 'jobs',
+    async run() {
+      return 0;
+    },
+  },
+  {
+    // 扫描 5：账号——a) rate_limited 到期未转移 → 条件 UPDATE 补转移（DES/03 §5.3）；
+    // b) status ∈ idle/disconnected 但网关侧可能仍在线 → 补调 gateway.disconnect（E10 收口）。
+    // 【扩展点：账号域归属任务（DES/03 §5）】
+    name: 'accounts',
+    async run() {
+      return 0;
+    },
+  },
+  {
+    // 扫描 6：pending_event 死信立即重试一轮（status='pending' AND next_retry_at<=now()）；
+    // 常态 5s 周期重试归调度器扫描（DES/08 §1.4）。
+    // 【扩展点：T-P2-04（死信三写事务 + 重试）】
+    name: 'pending-events',
+    async run() {
+      return 0;
+    },
+  },
+];
