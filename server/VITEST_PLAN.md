@@ -25,7 +25,7 @@
 | I11 | 序列重启只重排最早过期步骤 | `tests/sequences/restart-reschedule.test.ts`（崩溃点 ④） | ☐ |
 | I12 | WS seq 单调；sinceSeq 补发不重复；断线 3s 补齐 | `tests/ws/sinceseq.test.ts` | ☐ |
 | I13 | refresh 复用整会话作废；logout 后 access 即失效 | `tests/auth/session.test.ts` | ☐ |
-| I14 | 契约时序数字不取整 | 常量集中定义 + `tests/constants.test.ts`（对照速查表逐个断言值） | ☐ |
+| I14 | 契约时序数字不取整 | 常量集中定义 + `tests/constants.test.ts`（对照速查表逐个断言值） | ☑ |
 
 ## 2. 场景 S1–S8 → 编排与用例
 

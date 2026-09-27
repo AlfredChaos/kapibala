@@ -47,6 +47,24 @@
 - 偏差与【解读】：tsconfig `exclude` 收缩编译输入集——`src/__tests__/shapes.test.ts` 因此不再进 `tsc` 程序，其**编译期**穷尽性断言（`Record<X, true>`）暂不被根 typecheck 执行，**运行时**常量数组断言在 vitest 下仍然生效；单 tsconfig 无法同时「测试参与 typecheck + 不参与 emit」，如需完整编译期断言，后续以测试专用 tsconfig 分离收口（回 T-P0-02 串行变更）。
 - 踩坑：tsc 不清理旧产物——排除测试后已存在的 `dist/__tests__/` 仍残留，须手动删除后重建才能验证干净 emit。
 
+## 2026-09-27 T-P0-02 共享契约类型包 packages/contract
+- 做了什么：impl-a 填充全部跨包共享类型——`agent-protocol.ts`（agent 错误码 13 码 / 工具定义 / 协议形状）、`gateway-errors.ts`（网关 13 码）、`api-errors.ts`（自有 API 码全表 + 各状态联合类型）、`ws-events.ts`（REQ §2.3 六类 + DES/08 §2.3 扩展 group_updated/job）与 `index.ts` 导出。commit `bbcb69d`。
+- 验证命令与输出摘录：审查者 **PASS**，附变异探针证据——改名一个错误码 → `shapes.test.ts` 立即变红，还原后复绿（穷尽性断言真实生效，非恒绿）。
+- 偏差与【解读】：审查发现包缺 test 脚本与 vitest 配置（plain `vitest run` 会误执行 dist/ 编译副本）→ follow-up `17bfca7` 落 `vitest.config.ts` + `"test"` + tsconfig `exclude`（详见上一条目）；残留 info 级：`ws-events.ts` 的 group_updated 注释应显式引用 design/08 §2.3——**随本轮簿记提交修复**（一行注释，事件名 + §2.3 事件类型表扩展）。
+- 踩坑：见上条目（tsc 不清旧产物；单 tsconfig 下测试「参与 typecheck」与「不参与 emit」不可兼得）。
+
+## 2026-09-27 T-P0-03 全量数据库迁移（20 表 DDL）
+- 做了什么：impl-b 按 DES/02 全文一次性落地迁移 001–008：19 张业务表 + `schema_migrations`，全部约束/索引/生成列（含单飞行部分唯一索引、`sort_key` 生成列、`resend_count` CHECK）。commit `851c11f`。
+- 验证命令与输出摘录：审查者 **PASS**——保真度**穷举审计**（逐列逐约束对照 DES/02）：174 列 / 21 CHECK / 9 唯一索引 / 18 FK 全数核实；另 14 条行为探针（乱序投影/单飞行冲突/幂等重放等）全部通过。
+- 偏差与【解读】：契约空隙的保守解释（如状态列 text + CHECK 而非 enum）已在迁移文件内注释注明出处。
+- 踩坑：无。
+
+## 2026-09-27 T-P0-05 契约常量集中定义 + I14 对照测试
+- 做了什么：impl-a 落地 `server/src/constants.ts`（全仓唯一常量归宿）：54 个常量逐个带出处注释（QR §1 契约数字 + 各设计值），`tests/constants.test.ts` 56 条断言逐个对照。commit `e1e702f`。
+- 验证命令与输出摘录：I14 审查含**变异抽查**（篡改常量值 → 测试变红后还原）；`pnpm -F server test tests/constants.test.ts` → 全绿；VITEST_PLAN §1 的 I14 行已勾（☑）。
+- 偏差与【解读】：审查指出漏 `REFRESH_TOKEN_TTL_MS` 与 pending-event 保留常量——follow-up 曾挂 impl-a 待收口，**簿记时已落地**：`b204dfd`（refresh TTL + 死信/待定事件保留常量补齐）。
+- 踩坑：无。
+
 ---
 
 <!-- 后续任务条目按上述格式在此追加。示例：

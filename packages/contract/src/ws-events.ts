@@ -102,7 +102,7 @@ export interface WsSequenceRunEvent {
   };
 }
 
-/** DES/08 §2.3 扩展：PATCH 开关后推送，前端就地更新开关显示（DES/15 §2 页面 3） */
+/** group_updated（DES/08 §2.3 事件类型表扩展）：PATCH 开关后推送，前端就地更新开关显示（DES/15 §2 页面 3） */
 export interface WsGroupUpdatedEvent {
   seq: number;
   type: 'group_updated';

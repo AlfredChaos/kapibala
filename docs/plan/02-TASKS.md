@@ -32,7 +32,7 @@
   d) 不引入 Redis/MQ/ORM；不用 npm/yarn 生成 lockfile；`.gitignore` 覆盖 `.env`/`node_modules`/`dist`/`coverage`/`media/`/`*.tsbuildinfo`；root package.json 此后仅 T-P8-04 可改
   e) 根 AGENTS.md §1 命令表与本任务落地逐条核对同步；JOURNAL 登记端口表（:3000/:5173/:4100/:4200/:4300/:5432）
 
-### T-P0-02 共享契约类型包 packages/contract            [status: TODO]
+### T-P0-02 共享契约类型包 packages/contract            [status: DONE]
 - goal: 在 T-P0-01 建立的占位骨架（package.json/tsconfig/index.ts 空导出）之上填充全部跨包共享类型（SP-1 裁决：独立小包）：§2.2 Agent 协议形状、网关错误码、自有 API 错误码、WS 事件 payload。下游只读；包配置文件不动（F1 分工）。
 - refs: REQ §2.2、§2.3；DES/12-agent-service.md §2；DES/06-agent-module.md §12 风险 1；DES/08-realtime-module.md §2.3；QR §3/§4
 - owned: packages/contract/src/agent-protocol.ts、packages/contract/src/gateway-errors.ts、packages/contract/src/api-errors.ts、packages/contract/src/ws-events.ts（新增类型文件）、packages/contract/src/index.ts（导出改写的最小范围）、packages/contract/src/__tests__/shapes.test.ts——**不动** package.json/tsconfig（T-P0-01 占位所有）
@@ -45,7 +45,7 @@
   d) 包内**零契约数字**（数字只在 server constants，SP 见 00-SPEC §4.5）；无 any；无运行时依赖
   e) 无 VITEST 行；如后续需扩类型，回本任务串行变更并通知消费者
 
-### T-P0-03 全量数据库迁移（20 表 DDL）            [status: TODO]
+### T-P0-03 全量数据库迁移（20 表 DDL）            [status: DONE]
 - goal: 按 DES/02 全文一次性落地全部表、约束、索引、生成列（19 张业务表 + `schema_migrations`，SP-2），迁移文件按域分 001–008、版本连续；此后迁移目录封闭。
 - refs: /Users/alfredchaos/home/work/kapibala/docs/design/02-data-model.md 全文（§5.1 约束三索引、§7.1 单飞行索引、§8.3 步骤索引、§9 对照表）
 - owned: server/migrations/**（001-infra.sql … 008-sequence.sql 及后续本任务内文件）
@@ -71,7 +71,7 @@
   d) runner 约 100 行内；无 any；错误不吞；helpers/db.ts 保证每个测试文件独立 database（随机后缀），worker 间不争用
   e) VITEST 行 A0-1/A0-2/A-02/A-20/A-21 登记应勾；根 AGENTS.md §1 的 db:migrate 命令**只读核对**（root AGENTS.md 归 T-P0-01/T-P8-04 所有：发现偏差登记进 JOURNAL 由 T-P8-04 统一改，本任务不改）
 
-### T-P0-05 契约常量集中定义 + I14 对照测试            [status: TODO]
+### T-P0-05 契约常量集中定义 + I14 对照测试            [status: DONE]
 - goal: `server/src/constants.ts` 是**全仓唯一常量归宿**（预收集全部任务卡引用的常量）：除 QR §1 契约数字外，一并定义各设计文档的设计值常量（超时/重试/扫描/租约/保留窗口等，逐个带出处注释），`tests/constants.test.ts` 逐个断言（I14）。
 - refs: QR §1 全表；DES/01-architecture.md §4.4；AGENTS.md §3-2
 - owned: server/src/constants.ts、server/tests/constants.test.ts
