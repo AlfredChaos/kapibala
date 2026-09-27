@@ -100,6 +100,13 @@ async function runTerminalSideEffects(
        )`,
       [runId, maxIndex],
     );
+    // 被跳过的是末步（其后无 pending）→ run finished（§6 末步终态无 failed 逐字）
+    await client.query(
+      `UPDATE sequence_run SET status='finished', ended_at=now(), updated_at=now()
+       WHERE id=$1 AND status='running'
+         AND NOT EXISTS (SELECT 1 FROM sequence_run_step WHERE run_id=$1 AND status='pending' AND "index">$2)`,
+      [runId, maxIndex],
+    );
   }
   return cancelled.rows;
 }

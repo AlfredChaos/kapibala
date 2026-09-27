@@ -150,12 +150,19 @@ export function startOutboundDispatcher(options: OutboundDispatcherOptions): Out
         logger.warn({ messageId: msg.id }, 'send accepted but row already terminal; skip writeback');
         return;
       }
+      // 序列联动（DES/07 §4）：关联步骤 → accepted（pending 守卫）
+      await client.query(
+        `UPDATE sequence_run_step SET status='accepted', updated_at=now()
+         WHERE client_msg_id=$1 AND status='pending'`,
+        [msg.client_msg_id],
+      );
       await insertWsEvent(client, 'message', messageFrame(msg, 'accepted'));
     });
     notifyWsEventCommitted();
   }
 
-  /** 同名码 failed（SENDER_NOT_IN_GROUP / ACCOUNT_OFFLINE / 终态码写回共用） */
+  /** 同名码 failed（SENDER_NOT_IN_GROUP / ACCOUNT_OFFLINE / 终态码写回共用）；
+   *  序列联动（DES/07 §6）：关联步骤 failed + run failed 失败即停 + ws_event，同事务 */
   async function markFailed(client: PoolClient, msg: QueuedMessage, code: string): Promise<void> {
     const { rowCount } = await client.query(
       `UPDATE message SET delivery_status='failed', fail_code=$2, updated_at=now()
@@ -163,6 +170,28 @@ export function startOutboundDispatcher(options: OutboundDispatcherOptions): Out
       [msg.id, code],
     );
     if (rowCount === 1) {
+      const step = await client.query<{ run_id: string }>(
+        `UPDATE sequence_run_step SET status='failed', failed_at=now(), updated_at=now()
+         WHERE client_msg_id=$1 AND status IN ('pending','accepted')
+         RETURNING run_id`,
+        [msg.client_msg_id],
+      );
+      const runId = step.rows[0]?.run_id;
+      if (runId !== undefined) {
+        const run = await client.query(
+          `UPDATE sequence_run SET status='failed', ended_at=now(), updated_at=now()
+           WHERE id=$1 AND status='running' RETURNING group_id, current_step_index`,
+          [runId],
+        );
+        if (run.rows[0] !== undefined) {
+          await insertWsEvent(client, 'sequence_run', {
+            runId,
+            groupId: run.rows[0].group_id,
+            status: 'failed',
+            currentStepIndex: run.rows[0].current_step_index,
+          });
+        }
+      }
       await insertWsEvent(client, 'message', messageFrame(msg, 'failed'));
     }
   }

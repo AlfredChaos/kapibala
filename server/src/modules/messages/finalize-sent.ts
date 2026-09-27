@@ -11,6 +11,7 @@
 //   3) 序列联动：sequence_run_step status='sent'（pending/accepted 守卫）；
 //   4) ws_event(message {deliveryStatus:'sent'})。
 // 幂等：两条分支的谓词都收窄——重复调用（S2 重复推送、事件晚于探测）天然吸收为 noop。
+import { advanceAfterSent } from '../sequences/scheduler.js';
 import type { PoolClient } from 'pg';
 
 export type FinalizeOutcome =
@@ -109,13 +110,31 @@ export async function finalizeSent(
 
   if (outcome === 'noop') return outcome;
 
-  // 3. 序列联动（2a/2b 统一执行）：pending/accepted 步 → sent（下一步排期由 T-P6-04
-  //    调度器补——当前任务只落定状态字段，§4.3 原文的排期钩子随序列引擎落地）。
-  await client.query(
+  // 3. 序列联动（§3.2 ADV 框逐字）：pending/accepted 步 → sent(sent_at=事件时刻) +
+  //    下一步 scheduled_at = sent_at + 其 delay（T-P6-03 advanceAfterSent）+
+  //    current_step_index 推进 / 末步 run finished + ws_event(sequence_run)。
+  const sent = await client.query<{ run_id: string; index: number }>(
     `UPDATE sequence_run_step SET status='sent', sent_at=$2, updated_at=now()
-     WHERE client_msg_id=$1 AND status IN ('pending','accepted')`,
+     WHERE client_msg_id=$1 AND status IN ('pending','accepted')
+     RETURNING run_id, "index"`,
     [clientMsgId, sentAt],
   );
+  const sentStep = sent.rows[0];
+  if (sentStep !== undefined) {
+    const finished = await advanceAfterSent(client, sentStep.run_id, sentStep.index, new Date(sentAt));
+    if (finished) {
+      const run = await client.query<{ current_step_index: number; group_id: string }>(
+        `SELECT current_step_index, group_id FROM sequence_run WHERE id=$1`, [sentStep.run_id]);
+      await client.query(`INSERT INTO ws_event (type, payload) VALUES ('sequence_run', $1::jsonb)`, [
+        JSON.stringify({
+          runId: sentStep.run_id,
+          groupId: run.rows[0]?.group_id,
+          status: 'finished',
+          currentStepIndex: run.rows[0]?.current_step_index,
+        }),
+      ]);
+    }
+  }
 
   // 4. ws_event(message)：与行变更同事务（先持久化后推送，DES/08 §2.3）
   await client.query("INSERT INTO ws_event (type, payload) VALUES ('message', $1::jsonb)", [

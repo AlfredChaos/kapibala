@@ -35,6 +35,7 @@ import { registerDeadLetterScan } from './scheduler/deadletter-scan.js';
 import { registerRateLimitScan } from './scheduler/ratelimit-scan.js';
 import { registerJoinTimeoutScan } from './scheduler/join-timeout-scan.js';
 import { registerOrphanRunScan } from './scheduler/orphan-run-scan.js';
+import { registerSequenceScan } from './scheduler/sequence-scan.js';
 import { registerDispatchWakeupScan } from './scheduler/dispatch-wakeup.js';
 import { startOutboundDispatcher, type OutboundDispatcher } from './modules/messages/dispatcher.js';
 import { registerUnknownSettleScan } from './scheduler/unknown-scan.js';
@@ -195,6 +196,7 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   registerUnknownSettleScan({ pool, registry, logger, gateway, wakeDispatcher: outboundDispatcher.wake }); // T-P3-03：unknown 判定器 1s 兜底节拍
   registerTriggerSweepScan({ pool, registry, logger }); // T-P4-04：agent_trigger_queue 兜底（5s，R-B 守卫同判）
   registerOrphanRunScan({ pool, registry, logger }); // T-P4-12：租约过期 running run 的孤儿观测（O1：只观测不接管）
+  registerSequenceScan({ pool, registry, wakeDispatcher: outboundDispatcher.wake }); // T-P6-03：序列链头到期推进（1s tick）
   registerMediaScans({ pool, registry, gateway, logger, retentionDays: config.mediaRetentionDays }); // T-P8-01：C1 媒体下载（1s tick）+ 保留清理（内部 24h 节流）
   registry.register(WS_EVENT_RETENTION_SCAN_NAME, createWsEventRetentionScan({ pool }));
   // WS hub（T-P2-10）：挂在共享 app.server 的 /ws 升级路径（DES/01 同端口）；
