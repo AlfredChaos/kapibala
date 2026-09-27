@@ -569,11 +569,18 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
           return;
         }
         // pass：工具执行意图落库（§3 第 3 条；audit_verdict='pass' 同行）
+        // kick_user：kick_target 属「执行前已持久化凭据」（§9.2 kick 行逐字）——必须在网关调用
+        //   前的已提交事务里落库；留在工具内部事务会被崩溃回滚吞掉，恢复只能记 missing credential。
+        const kickTarget =
+          tool.name === 'kick_user' && typeof tool.input === 'object' && tool.input !== null
+            ? (tool.input as Record<string, unknown>)['platform_user_id']
+            : undefined;
         await tx(deps.pool, (c) =>
           c.query(
-            `UPDATE agent_run_step SET status='tool_dispatched', audit_verdict='pass', updated_at=now()
+            `UPDATE agent_run_step SET status='tool_dispatched', audit_verdict='pass',
+                    kick_target=COALESCE($3, kick_target), updated_at=now()
              WHERE run_id=$1 AND seq=$2`,
-            [runId, seq],
+            [runId, seq, typeof kickTarget === 'string' ? kickTarget : null],
           ),
         );
       }

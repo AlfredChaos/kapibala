@@ -23,7 +23,7 @@
 | I7 | WS 事件对应已持久化状态（同事务） | `tests/ws/hub.test.ts`（崩溃后重放无「先事件后状态」） | ☐ |
 | I8 | 游标只推进连续前缀；停机事件恢复后全部处理 | `tests/events/cursor-prefix.test.ts` + `tests/events/resume.test.ts` | ☐ |
 | I9 | unknown 5s 落定；by-client-id 不可用期间保持、恢复后 2s 内定 | `tests/messages/unknown-adjudicator.test.ts`（开关 gw-9） | ☐ |
-| I10 | agent run 恢复同 runId；已产生效果的工具不重放不记失败 | `tests/agent/crash-recovery.test.ts`（四个崩溃点 ×2/③） | ☐ |
+| I10 | agent run 恢复同 runId；已产生效果的工具不重放不记失败 | `tests/agent/crash-recovery.test.ts`（四个崩溃点 ×2/③） | ☑（crash 半边，T-P7-03） |
 | I11 | 序列重启只重排最早过期步骤 | `tests/sequences/restart-reschedule.test.ts`（崩溃点 ④） | ☐ |
 | I12 | WS seq 单调；sinceSeq 补发不重复；断线 3s 补齐 | `tests/ws/sinceseq.test.ts` | ☐ |
 | I13 | refresh 复用整会话作废；logout 后 access 即失效 | `tests/auth/session.test.ts` | ☑ |
@@ -77,8 +77,8 @@
 | 崩溃点 | 注入位置 | 用例 | 状态 |
 |---|---|---|---|
 | ① queued 未发（first_attempt_at 落库前/后） | dispatcher 事务边界 | `tests/crash/crash-consistency.test.ts` | ☑（T-P7-02）
-| ② turn 已发未收（turn_dispatched） | turn HTTP 前后 | `tests/agent/crash-recovery.test.ts` | ☐ |
-| ③ tool_dispatched（send/kick 效果未知） | 工具执行前后 | `tests/agent/crash-recovery.test.ts` | ☐ |
+| ② turn 已发未收（turn_dispatched） | turn HTTP 前后 | `tests/agent/crash-recovery.test.ts` | ☑（T-P7-03） |
+| ③ tool_dispatched（send/kick 效果未知） | 工具执行前后 | `tests/agent/crash-recovery.test.ts` | ☑（T-P7-03） |
 | ④ 序列排期中（链头已排期/在途） | 排期事务边界 | `tests/sequences/restart-reschedule.test.ts` | ☐ |
 
 ## 5. 设计审查修复项的回归用例（review/01 §2）
