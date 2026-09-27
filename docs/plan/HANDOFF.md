@@ -28,10 +28,7 @@
 
 ## 进行中
 
-- T-P1-04 send/kick/leave/members/by-client-id — **已提交（0c77efa），审查进行中**。
-- T-P1-05 S1/S2 驱动开关（gw-1/2/3）与 counters 断言 — 新 worker 实施中（含 T-P1-02 的 decorateFrame 扩缝）。
-- T-P2-01 server 网关 client（gateway/） — 新 worker 实施中。
-- 下一批派发（按 DAG）：T-P2-02（调度器/恢复器骨架 + 启动时序）、T-P2-03（SSE 消费循环 + 连续前缀游标）。
+- 无进行中任务：73/73 卡全部 DONE，P0–P8 阶段门全部达成（见「剩余」与文末终态块）。
 
 ## 剩余（按 DAG 顺序，详见 02-TASKS.md）
 
