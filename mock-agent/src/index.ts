@@ -1,8 +1,13 @@
-// 占位入口（T-P0-01）：mock-agent 的 Fastify 应用与 scripted/anthropic 双 provider 归 T-P4-01。
-// 此刻仅保持 dev 进程存活并打就绪日志（不占用端口，避免与正式实现抢 4200）。
+// 可执行入口（DES/12 §5：单包双 provider；scripted 默认实例 :4200，anthropic C2 实例 :4300 按需另起）。
+import { createAgentApp } from './app.js';
+
 const PORT = Number(process.env.PORT ?? 4200);
 
-console.log(`[mock-agent] placeholder entry (PORT=${PORT}); Fastify app + providers land in T-P4-01`);
-
-// 悬空定时器保活：占位阶段无服务可跑，维持进程存在即可
-setInterval(() => {}, 60_000);
+try {
+  // 装配在 listen 之前：AGENT_MODE/ANTHROPIC_API_KEY 未配置在起服前就炸（DES/12 §6）
+  const app = createAgentApp({ logger: true });
+  await app.listen({ port: PORT, host: '0.0.0.0' });
+} catch (err) {
+  console.error({ err }, 'mock-agent failed to start');
+  process.exit(1);
+}
