@@ -5,8 +5,9 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import Fastify, { type FastifyInstance } from 'fastify';
 import pino, { type Logger } from 'pino';
 import type { Pool } from 'pg';
+import type { GatewayClient } from '../gateway/client.js';
 import { applyRequestId } from './plugins/request-id.js';
-import { applyErrorMapping } from './plugins/errors.js';
+import { applyErrorMapping, AppError } from './plugins/errors.js';
 import { applyAuthGuard, stubVerifyAccessToken, type VerifyAccessToken } from './plugins/auth-guard.js';
 import { registerRoutes } from './routes/index.js';
 
@@ -28,13 +29,26 @@ export interface BuildAppOptions {
   logger?: Logger;
   /** T-P0-07 落地后由认证模块注入；缺省 = stub（一切 token 401，守卫不可绕过） */
   verifyAccessToken?: VerifyAccessToken;
+  /** T-P2-05 起账号域路由需要；缺省 = stub（一切调用 503，与「网关未接线」语义一致） */
+  gateway?: GatewayClient;
 }
+
+/** gateway 未注入时的保守 stub：任何外呼按「网关不可达」处理（503 INTERNAL + unavailable 标记） */
+const stubGatewayClient = new Proxy({} as GatewayClient, {
+  get(_t, method: string) {
+    return async () => {
+      throw new AppError('INTERNAL', `gateway client not wired (method ${method})`, {
+        statusCode: 503,
+      });
+    };
+  },
+});
 
 export async function buildApp(options: BuildAppOptions): Promise<App> {
   const app: App = Fastify({ loggerInstance: options.logger ?? pino() });
   await applyRequestId(app);
   await applyErrorMapping(app);
   await applyAuthGuard(app, { verifyAccessToken: options.verifyAccessToken ?? stubVerifyAccessToken });
-  await registerRoutes(app, { pool: options.pool });
+  await registerRoutes(app, { pool: options.pool, gateway: options.gateway ?? stubGatewayClient });
   return app;
 }

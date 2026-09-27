@@ -6,6 +6,7 @@
 // 宪法 §3-5：扫描体必须全部条件更新、可重复触发（幂等吸收）——本骨架不含任何进程内正确性判定。
 import type { Pool } from 'pg';
 import { retryDeadLettersOnce } from '../events/deadletter.js';
+import { runAccountsRecoveryScan } from '../modules/accounts/transitions.js';
 import type { DispatchRegistry } from '../events/dispatch.js';
 import type { GatewayClient } from '../gateway/client.js';
 
@@ -76,10 +77,10 @@ export const RECOVERY_SCANS: readonly RecoveryScan[] = [
   {
     // 扫描 5：账号——a) rate_limited 到期未转移 → 条件 UPDATE 补转移（DES/03 §5.3）；
     // b) status ∈ idle/disconnected 但网关侧可能仍在线 → 补调 gateway.disconnect（E10 收口）。
-    // 【扩展点：账号域归属任务（DES/03 §5）】
+    // T-P2-05 已接线：模块函数 runAccountsRecoveryScan（条件更新 + 幂等外呼，宪法 §3-5）。
     name: 'accounts',
-    async run() {
-      return 0;
+    async run(deps) {
+      return runAccountsRecoveryScan(deps.pool, { disconnect: (id) => deps.gateway.disconnect(id) });
     },
   },
   {

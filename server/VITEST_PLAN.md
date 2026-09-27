@@ -16,7 +16,7 @@
 | I2 | 一条出站记录至多一条网关消息（重发 ≤1 且先确认未发出） | `tests/messages/unknown-adjudicator.test.ts`（开关 gw-7/8）+ crash ① | ☐ |
 | I3 | 时间线无重复行；(groupId,msgId) 唯一；回流合并一行 | `tests/messages/finalize-sent.test.ts`（含乱序合并稳态断言，D1-3/D3-5） | ☐ |
 | I4 | 每群至多一个 running agent run / 序列 run | `tests/agent/trigger.test.ts`、`tests/sequences/start-mutex.test.ts`（S7） | ☐ |
-| I5 | 账号只沿转移表变化；终态无出边；CAS 后写不覆盖 | `tests/accounts/state-machine.test.ts`（并发 CAS 注入） | ☐ |
+| I5 | 账号只沿转移表变化；终态无出边；CAS 后写不覆盖 | `tests/accounts/state-machine.test.ts`（并发 CAS 注入） | ☑ |
 | I6 | 终态副作用原子（全有或全无；含在途转 unknown，D1-2） | `tests/accounts/terminal-side-effects.test.ts`（事务中途回滚注入 + 在途竞态） | ☐ |
 | I7 | WS 事件对应已持久化状态（同事务） | `tests/ws/hub.test.ts`（崩溃后重放无「先事件后状态」） | ☐ |
 | I8 | 游标只推进连续前缀；停机事件恢复后全部处理 | `tests/events/cursor-prefix.test.ts` + `tests/events/resume.test.ts` | ☐ |
@@ -92,7 +92,7 @@
 | X-1 kick 码表 | gw-24(504 仍在)/gw-17 → tool_result.code ∈ 13 码表（SEND_FAILED），细节在 message | `tests/agent/tools-kick.test.ts` | ☐ |
 | X-2 取消检查点 | send_message 步中关闭 agentEnabled → 当前步含 tool_result 完整落库、run cancelled、无悬挂 tool_use | `tests/agent/turn-loop.test.ts` | ☐ |
 | D3-1 孤儿事件 | 未知群 message 事件 → 账本+inconsistency、不进死信 | `tests/events/dead-letter.test.ts` | ☐ |
-| D3-4 手动限流入参 | transition to=rate_limited 缺 rateLimitedUntil → 400 | `tests/accounts/transition.test.ts` | ☐ |
+| D3-4 手动限流入参 | transition to=rate_limited 缺 rateLimitedUntil → 400 | `tests/accounts/transition.test.ts` | ☑ |
 | R-B 守卫 | END2/SWEEP 补建前复查 group.status+agent_enabled；守卫不过时积压行保留 | `tests/agent/trigger-queue-guard.test.ts` | ☐ |
 
 ## 6. 进度总览
@@ -123,3 +123,9 @@
 | B3-1 | refresh HttpOnly cookie | `tests/auth/session.test.ts` | ☑ |
 | B3-2 | 复用作废整会话 | `tests/auth/session.test.ts` | ☑ |
 | B3-3 | logout 即失效 | `tests/auth/session.test.ts` | ☑ |
+| A-03 | GET /api/accounts 字段 | `tests/accounts/state-machine.test.ts` | ☑ |
+| A-04 | connect 端点语义 | `tests/accounts/state-machine.test.ts`（connect 用例在 state-machine 段；00-SPEC §5 写 transition.test 系登记笔误） | ☑ |
+| A-05 | transition 三段式错误码 | `tests/accounts/transition.test.ts` | ☑ |
+| A1-1 | 转移表 15 边（API 表 = REQ 网格扣除 connect 专属 disconnected→online） | `tests/accounts/state-machine.test.ts` | ☑ |
+| A1-2 | 终态无出边、重复进入幂等 | `tests/accounts/state-machine.test.ts`（终态无出边）+ `transition.test.ts`（重复 CAS_CONFLICT） | ☑ |
+| A1-4 | CAS 后写不覆盖 | `tests/accounts/transition.test.ts`（并发恰一成功） | ☑ |

@@ -88,3 +88,8 @@
 58. 迁移可重复执行；**schema 落后于代码拒绝启动**（`/api/health` 暴露 `schemaVersion`）。
 59. 错误格式统一 `{ error: { code, message, requestId, … } }`；时间字段 ISO 8601 UTC、无值为 `null`。
 60. **总则兜底**：以上每一条，在服务任意时刻重启前后都必须成立——所有外部效果（网关调用 / WS 推送）之前状态必须已持久化。
+61. **A1 转移表：REQ 网格 16 ✔ ≠ transition API 15 边**——`disconnected→online` 在 mermaid 标的
+   是「connect 成功」，即 connect 专属边（connect 前置本来就含 disconnected）；transition API
+   到 online 无网关补偿路径（disconnect 补偿只挂 to∈{disconnected,idle}），故 applyTransition
+   的合法边集合是扣除该边的 15 条（DES/03 §1「合法转移 15 条」、design/11 A1-1 同口径）。
+   别把 REQ 网格直接当 API 表用。

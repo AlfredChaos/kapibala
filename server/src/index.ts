@@ -102,8 +102,9 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   }
   logger.info({ schemaVersion, port: config.port }, 'schema version verified');
 
-  const app = await buildApp({ pool, logger, verifyAccessToken: createVerifyAccessToken(pool) });
+  // 网关 client 先于 buildApp：账号域路由（connect/transition 补偿调用）需要注入同一实例（T-P2-05）
   const gateway = createGatewayClient({ baseUrl: config.gatewayUrl });
+  const app = await buildApp({ pool, logger, gateway, verifyAccessToken: createVerifyAccessToken(pool) });
 
   // 分发注册表为 boot 共享实例（T-P2-04）：消费循环的分发、死信重试的 b) 重放、
   // 后续领域任务（T-P2-06/08/09…）的 handler 注册，全部指向同一张表。
