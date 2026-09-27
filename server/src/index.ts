@@ -9,6 +9,7 @@ import pino from 'pino';
 import { ConfigError, loadConfig } from './config/index.js';
 import { createPool } from './db/pool.js';
 import { ensureSchemaVersion } from './db/ensure-schema.js';
+import { createVerifyAccessToken } from './http/routes/auth.js';
 import { buildApp } from './http/app.js';
 
 const logger = pino();
@@ -19,7 +20,8 @@ async function main(): Promise<void> {
   const schemaVersion = await ensureSchemaVersion(pool); // 不匹配 → throw → 下方 catch → exit(1)
   logger.info({ schemaVersion, port: config.port }, 'schema version verified, starting http server');
 
-  const app = await buildApp({ pool });
+  // T-P0-07：真实 access token 验证替换 T-P0-04 的 stub（查表 + 过期 + 会话状态）
+  const app = await buildApp({ pool, verifyAccessToken: createVerifyAccessToken(pool) });
   // —— [T-P2-02 接线点] 恢复登记 / SSE 异步消费 / 调度器，插在 listen 之前 ——
   await app.listen({ port: config.port, host: '0.0.0.0' });
 
