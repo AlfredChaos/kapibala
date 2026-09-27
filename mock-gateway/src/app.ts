@@ -1,6 +1,7 @@
 // 应用工厂（DES/14 §1 HTTP 契约层）：进程内装配（app.inject）与独立进程共用同一工厂。
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerAccountRoutes } from './accounts.js';
+import { registerSseRoutes } from './sse.js';
 import { registerTestPlane } from './test-plane.js';
 import { createGatewayState, DEFAULT_SEED_ACCOUNTS, type GatewayState } from './state.js';
 
@@ -35,5 +36,7 @@ export function createGatewayApp(options: GatewayAppOptions = {}): GatewayApp {
 
   registerAccountRoutes(app, state);
   registerTestPlane(app, state);
+  // SSE 推送器（T-P1-02；最小 wiring 适配：路由注册必须在工厂内落地）
+  registerSseRoutes(app, state);
   return app;
 }

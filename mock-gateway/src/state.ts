@@ -93,6 +93,12 @@ export interface GatewayState {
   extSeq: number;
   msgSeq: number;
   counters: GatewayCounters;
+  /**
+   * 账本订阅者（SSE 推送器注册；T-P1-02）。「先入账后投递」的投帧 seam：
+   * appendLedger 在帧落账之后才逐个通知——订阅侧永远看到已提交的账（DES/14 §1）。
+   * 属传输层而非业务状态：reset 不清（连接不断，账本内容清空）。
+   */
+  ledgerListeners: Set<(frame: LedgerFrame) => void>;
   /** 创建时的种子清单：reset 恢复到此全集（DES/14 §6 GATEWAY_SEED_ACCOUNTS） */
   seedAccountIds: readonly string[];
   switches: Map<string, SwitchConfig>;
@@ -144,6 +150,7 @@ export function createGatewayState(seedAccountIds: readonly string[] = DEFAULT_S
     },
     seedAccountIds,
     switches: new Map(),
+    ledgerListeners: new Set(),
   };
 }
 
@@ -188,6 +195,10 @@ export function appendLedger(
     emittedAt: Date.now(),
   };
   state.ledger.push(frame);
+  // 先入账后投递（DES/14 §1）：订阅者在帧已落账后才被通知；订阅者异常不阻断账本（无静默丢帧的另一半）
+  for (const listener of state.ledgerListeners) {
+    listener(frame);
+  }
   state.counters.framesEmitted += 1;
   return frame;
 }
