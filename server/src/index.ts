@@ -21,6 +21,9 @@ import { createAccountStatusHandler } from './events/handlers/account-status.js'
 import { createMessageHandler } from './events/handlers/message.js';
 import { createMemberHandler } from './events/handlers/member.js';
 import { createMessageSentHandler, createMessageFailedHandler } from './events/handlers/confirm.js';
+import { createAgentClient } from './agentclient/index.js';
+import { createAgentExecutor } from './modules/agent/executor.js';
+import { setAgentRunStarter } from './modules/agent/trigger.js';
 import { createGatewayClient, type GatewayClient } from './gateway/client.js';
 import { createVerifyAccessToken } from './http/routes/auth.js';
 import { buildApp, type App } from './http/app.js';
@@ -119,6 +122,18 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   // 出站 dispatcher（T-P3-02）：先于 buildApp 创建——onMessageAccepted 缝要往这里接线；
   // 泵是惰性（无 wake 不占连接），创建即「启动」：wake/扫描/到期恢复三路唤醒由它内部 advisory lock 消化。
   const outboundDispatcher = startOutboundDispatcher({ pool, gateway, logger });
+  // agent executor 接线（T-P4-05）：agentclient 三段式校验 + 进程内并发闸 + advisory lock；
+  // startAgentRun 缝接上真 executor——触发/END2/SWEEP 的 run 创建即刻被拾取（占位→实线）
+  const agentClient = createAgentClient({ baseUrl: config.agentUrl, turnTimeoutMs: config.agentTurnTimeoutMs });
+  setAgentRunStarter(
+    createAgentExecutor({
+      pool,
+      agentClient,
+      logger,
+      instanceId: `pid-${process.pid}`,
+      maxConcurrentRuns: config.agentMaxConcurrentRuns,
+    }),
+  );
   const app = await buildApp({
     pool,
     logger,

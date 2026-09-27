@@ -7,6 +7,7 @@
 // R-B 定稿：守卫不过 → 积压行保留不删、不补建 run；agentEnabled 重新打开后由 SWEEP 补建
 // （README 解释声明 #26「重新启用后补处理」的唯一实现点）。
 import type { PoolClient } from 'pg';
+import { AGENT_WALL_CLOCK_MS } from '../../constants.js';
 
 /** executor 拾取占位（T-P4-05 接管：advisory lock + 并发闸 + 租约，§2.1） */
 export interface AgentRunStarter {
@@ -93,11 +94,11 @@ export async function createRunFromBacklog(
   };
   // 先建 run 后删积压：极端并发下 DO NOTHING 命中冲突时返回 undefined，积压行原样保留
   const run = await client.query<{ id: string }>(
-    `INSERT INTO agent_run (id, group_id, status, trigger_context)
-     VALUES (gen_random_uuid(), $1, 'running', $2::jsonb)
+    `INSERT INTO agent_run (id, group_id, status, trigger_context, wall_deadline_at)
+     VALUES (gen_random_uuid(), $1, 'running', $2::jsonb, now() + $3 * interval '1 millisecond')
      ON CONFLICT (group_id) WHERE status = 'running' DO NOTHING
      RETURNING id`,
-    [group.id, JSON.stringify(triggerContext)],
+    [group.id, JSON.stringify(triggerContext), AGENT_WALL_CLOCK_MS],
   );
   const runId = run.rows[0]?.id;
   if (runId === undefined) {

@@ -7,6 +7,7 @@
 // 按 sentAt 升序, policy:{autoKickEnabled}, ownPlatformUserIds:[全部服务账号 puid] }。
 // 本文件只覆盖「入口触发」；run 结束事务的积压补建 / 调度器 SWEEP / executor 编排归 T-P4-04 接管。
 import type { PoolClient } from 'pg';
+import { AGENT_WALL_CLOCK_MS } from '../../constants.js';
 import { startAgentRun } from './trigger.js';
 
 export interface TriggerMessageInput {
@@ -59,11 +60,11 @@ export async function tryTriggerAgentRun(
     ownPlatformUserIds: puids.rows.map((r) => r.platform_user_id),
   };
   const run = await client.query<{ id: string }>(
-    `INSERT INTO agent_run (id, group_id, status, trigger_context)
-     VALUES (gen_random_uuid(), $1, 'running', $2::jsonb)
+    `INSERT INTO agent_run (id, group_id, status, trigger_context, wall_deadline_at)
+     VALUES (gen_random_uuid(), $1, 'running', $2::jsonb, now() + $3 * interval '1 millisecond')
      ON CONFLICT (group_id) WHERE status = 'running' DO NOTHING
      RETURNING id`,
-    [group.id, JSON.stringify(triggerContext)],
+    [group.id, JSON.stringify(triggerContext), AGENT_WALL_CLOCK_MS],
   );
   const runId = run.rows[0]?.id;
   if (runId === undefined) {

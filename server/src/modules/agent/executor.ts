@@ -1,0 +1,492 @@
+// agent run executor：拾取（advisory lock + 并发闸）+ turn 循环骨架（T-P4-05；
+// DES/06 §2.1/§3/§5/§6 逐字 + REQ A5-2 + QR §1）。
+// 拾取：进程内计数信号量（AGENT_MAX_CONCURRENT_RUNS【设计值】只限拾取不限创建）→
+//   pg_try_advisory_lock(hashtextextended('agent-run:'+runId,0)) 抢不到即退（多实例互斥）→
+//   claimed_by + lease_until=now()+10s，每 2s 续租（DES/06 §2.1【设计值】）。
+// turn 循环每步固定结构（§3，崩溃恢复基石）：
+//   0) 预算预检（12 步含结束步 / 墙钟 60s 含审计停机不计 / 连续 3 协议错误——budget.ts）+
+//      墙钟记账 wall_consumed_ms += now()-COALESCE(resume_at,created_at)、resume_at=now()；
+//   1) INSERT step(seq=n, status='turn_dispatched', dispatch_payload=请求快照) → 才发 HTTP（E11）；
+//   2) 响应/超时以条件更新 WHERE status='turn_dispatched' 写回——晚到响应 rowcount=0 即丢弃；
+//   3) 合法 tool_use → 追加 assistant 块（重复 tool_use_id / 未知工具 / 入参不符走 §4 分流——
+//      本文件先落最小判据，T-P4-06 归位 validation.ts/protocol-errors.ts 细化）；
+//   4) 工具结果与 appended_blocks 同事务写回 → status='done'；
+//   5) run 级 step_count/streak/wall_consumed_ms 随步事务累加；任一合法响应 streak 清零。
+// 会话历史 100% 由 DB 重建：messages=[user(trigger_context JSON)] + 各 step appended_blocks
+// 按 seq 拼接（§6 逐字，executor 无内存会话状态——A5-8 恢复前提）。
+// 工具执行语义缝：executeTool 注入（finish 内置收束；其余工具默认 UNKNOWN_TOOL 路径 A，
+// T-P4-07/08/09 接管 send_message/kick_user/get_recent_messages 与审计门禁）。
+import type { Pool, PoolClient } from 'pg';
+import {
+  AGENT_LEASE_RENEW_MS,
+  AGENT_LEASE_TTL_MS,
+  AGENT_MAX_CONCURRENT_RUNS,
+} from '../../constants.js';
+import { tx } from '../../db/tx.js';
+import type { AgentClient, AgentMessage, AgentTurnRequest, AgentTurnResponse } from '../../agentclient/index.js';
+import { AgentClientError } from '../../agentclient/index.js';
+import { checkBudget } from './budget.js';
+import { endAgentRun } from './end-run.js';
+import { AGENT_TOOLS, AGENT_TOOL_NAMES } from './tools-def.js';
+import { startAgentRun } from './trigger.js';
+
+const RAW_RESPONSE_MAX_BYTES = 2048; // raw_response 落库截断 2KB（REQ §2.2/DES/06 §11）
+
+export interface ExecutorLogger {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
+/** 工具执行语义缝（T-P4-07..09 接管）；executor 只负责把结果按 §3 结构落库 */
+export type ToolOutcome =
+  | {
+      readonly type: 'result';
+      /** tool_result content（JSON 串或纯文本——按 §7 各工具契约组装） */
+      readonly content: string;
+      readonly isError?: boolean;
+      readonly resultSummary?: string;
+    }
+  | {
+      readonly type: 'end_run';
+      readonly status: 'finished' | 'failed' | 'blocked' | 'cancelled';
+      readonly endReason: 'final' | 'budget_exhausted' | 'wall_clock' | 'protocol_errors' | 'audit_blocked' | 'cancelled';
+      readonly summary?: string;
+      /** 结束步仍可带 tool_result（如 AUDIT_REJECTED 前的 fail） */
+      readonly toolResult?: { readonly content: string; readonly isError?: boolean };
+      readonly resultSummary?: string;
+    };
+
+export interface ToolCallContext {
+  readonly client: PoolClient;
+  readonly runId: string;
+  readonly groupId: string;
+  readonly stepSeq: number;
+  readonly toolName: string;
+  readonly input: unknown;
+}
+
+export type ToolExecutor = (ctx: ToolCallContext) => Promise<ToolOutcome>;
+
+export interface AgentExecutorDeps {
+  readonly pool: Pool;
+  readonly agentClient: AgentClient;
+  readonly logger: ExecutorLogger;
+  /** claimed_by 取值（多实例区分） */
+  readonly instanceId: string;
+  readonly maxConcurrentRuns?: number;
+  readonly executeTool?: ToolExecutor;
+}
+
+interface RunRow {
+  readonly id: string;
+  readonly group_id: string;
+  readonly trigger_context: Record<string, unknown>;
+  readonly step_count: number;
+  readonly protocol_error_streak: number;
+  readonly wall_consumed_ms: string; // bigint → pg 返回字符串
+  readonly wall_deadline_at: Date | null;
+}
+
+interface StepRow {
+  readonly seq: number;
+  readonly appended_blocks: unknown;
+}
+
+function clipRaw(raw: string | undefined): string | null {
+  if (raw === undefined) return null;
+  return Buffer.byteLength(raw, 'utf8') <= RAW_RESPONSE_MAX_BYTES
+    ? raw
+    : Buffer.from(raw, 'utf8').subarray(0, RAW_RESPONSE_MAX_BYTES).toString('utf8');
+}
+
+/** 会话历史：messages[0]=trigger_context JSON 串 + 各 step appended_blocks 按 seq 顺序拼接（§6 逐字） */
+async function rebuildMessages(client: PoolClient, run: RunRow): Promise<AgentMessage[]> {
+  const { rows } = await client.query<StepRow>(
+    'SELECT seq, appended_blocks FROM agent_run_step WHERE run_id=$1 ORDER BY seq',
+    [run.id],
+  );
+  const messages: AgentMessage[] = [
+    { role: 'user', content: [{ type: 'text', text: JSON.stringify(run.trigger_context) }] },
+  ];
+  for (const r of rows) {
+    const blocks = r.appended_blocks;
+    if (Array.isArray(blocks)) {
+      for (const b of blocks) {
+        if (typeof b === 'object' && b !== null) messages.push(b as AgentMessage);
+      }
+    }
+  }
+  return messages;
+}
+
+export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: string): void } {
+  const maxConcurrent = deps.maxConcurrentRuns ?? AGENT_MAX_CONCURRENT_RUNS;
+  let active = 0;
+  const pending: string[] = [];
+
+  function pump(): void {
+    while (active < maxConcurrent && pending.length > 0) {
+      const runId = pending.shift();
+      if (runId === undefined) break;
+      active += 1;
+      void executeRun(runId)
+        .catch((err: unknown) => {
+          deps.logger.error({ err, runId }, 'agent executor crashed mid-run');
+        })
+        .finally(() => {
+          active -= 1;
+          pump(); // 释放空位即触发待拾取扫描（§2.1：信号量空位驱动，无定时重试编排）
+        });
+    }
+  }
+
+  async function executeRun(runId: string): Promise<void> {
+    // 1) advisory lock（会话级——必须专用连接持有到 run 结束；抢不到 = 别的实例已接管）
+    const lockClient = await deps.pool.connect();
+    const locked = await lockClient.query<{ ok: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtextextended('agent-run:' || $1, 0)) AS ok",
+      [runId],
+    );
+    if (locked.rows[0]?.ok !== true) {
+      lockClient.release();
+      return;
+    }
+    // 2) 拾取标记 + 首期租约（锁连接上做，释放前都有效）
+    await lockClient.query(
+      `UPDATE agent_run SET claimed_by=$2, lease_until=now() + $3 * interval '1 millisecond', updated_at=now()
+       WHERE id=$1 AND status='running'`,
+      [runId, deps.instanceId, AGENT_LEASE_TTL_MS],
+    );
+    const renew = setInterval(() => {
+      void deps.pool
+        .query(
+          `UPDATE agent_run SET lease_until=now() + $2 * interval '1 millisecond', updated_at=now()
+           WHERE id=$1 AND status='running'`,
+          [runId, AGENT_LEASE_TTL_MS],
+        )
+        .catch((err: unknown) => deps.logger.warn({ err, runId }, 'lease renew failed'));
+    }, AGENT_LEASE_RENEW_MS);
+    renew.unref();
+
+    try {
+      await turnLoop(runId);
+    } finally {
+      clearInterval(renew);
+      await lockClient.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [
+        `agent-run:${runId}`,
+      ]).catch(() => undefined);
+      lockClient.release();
+    }
+  }
+
+  /** 每轮开始：FOR UPDATE 读 run + 墙钟记账 + 预算预检；超限则同事务终态化 */
+  async function precheck(runId: string): Promise<{ proceed: boolean; run?: RunRow; nextRunId?: string }> {
+    return tx(deps.pool, async (client) => {
+      const { rows } = await client.query<RunRow>(
+        `SELECT id, group_id, trigger_context, step_count, protocol_error_streak, wall_consumed_ms, wall_deadline_at
+         FROM agent_run WHERE id=$1 AND status='running' FOR UPDATE`,
+        [runId],
+      );
+      const run = rows[0];
+      if (run === undefined) return { proceed: false }; // 已被并发终态化（取消/恢复）
+      // 墙钟记账（§5 逐字公式；停机不计——resume_at 只随进程内步事务推进）
+      await client.query(
+        `UPDATE agent_run SET
+           wall_consumed_ms = wall_consumed_ms + GREATEST(0, EXTRACT(EPOCH FROM (now() - COALESCE(resume_at, created_at))) * 1000)::bigint,
+           resume_at = now(), updated_at = now()
+         WHERE id=$1`,
+        [runId],
+      );
+      const verdict = checkBudget(
+        {
+          stepCount: run.step_count,
+          wallConsumedMs: Number(run.wall_consumed_ms),
+          wallDeadlineAt: run.wall_deadline_at,
+          protocolErrorStreak: run.protocol_error_streak,
+        },
+        new Date(),
+      );
+      if (verdict.ok) return { proceed: true, run };
+      const end = await endAgentRun(client, {
+        runId,
+        status: 'failed',
+        endReason: verdict.endReason,
+      });
+      return { proceed: false, nextRunId: end.nextRunId };
+    });
+  }
+
+  /** 协议错误路径 B：不追加 assistant 块，只追加 user text「PROTOCOL_ERROR <code>: …」 */
+  async function recordProtocolError(
+    runId: string,
+    seq: number,
+    code: string,
+    rawResponse: string | null,
+    stepCounted: boolean,
+  ): Promise<{ streakHit: boolean }> {
+    return tx(deps.pool, async (client) => {
+      const { rowCount } = await client.query(
+        `UPDATE agent_run_step SET kind='protocol_error', status='done', error_code=$3,
+                raw_response=$4, appended_blocks=$5::jsonb, updated_at=now()
+         WHERE run_id=$1 AND seq=$2 AND status IN ('turn_dispatched','turn_received')`,
+        [
+          runId,
+          seq,
+          code,
+          rawResponse,
+          JSON.stringify([{ role: 'user', content: [{ type: 'text', text: `PROTOCOL_ERROR ${code}: agent response rejected` }] }]),
+        ],
+      );
+      if (rowCount !== 1) return { streakHit: false }; // 晚到/重复写回丢弃
+      // 协议错误步同样计步（A5-2「一步=一次往返无论返回什么」）；
+      // turn_received 已计步的路径（如 DUPLICATE_TOOL_USE_ID）不再重复加
+      const { rows } = await client.query<{ streak: number }>(
+        `UPDATE agent_run SET protocol_error_streak=protocol_error_streak+1,
+                step_count=step_count+$2::int, updated_at=now()
+         WHERE id=$1 RETURNING protocol_error_streak AS streak`,
+        [runId, stepCounted ? 0 : 1],
+      );
+      return { streakHit: (rows[0]?.streak ?? 0) >= 3 };
+    });
+  }
+
+  async function turnLoop(runId: string): Promise<void> {
+    for (;;) {
+      const pre = await precheck(runId);
+      if (!pre.proceed) {
+        if (pre.nextRunId !== undefined) startAgentRun(pre.nextRunId);
+        return;
+      }
+      const run = pre.run;
+      if (run === undefined) return;
+      const seq = run.step_count + 1;
+
+      // 步 1：意图先行——step 先 turn_dispatched 带请求快照（E11），之后才发 HTTP
+      const messages = await tx(deps.pool, (c) => rebuildMessages(c, run));
+      const request: AgentTurnRequest = { runId, tools: AGENT_TOOLS, messages };
+      await tx(deps.pool, (c) =>
+        c.query(
+          `INSERT INTO agent_run_step (run_id, seq, kind, status, dispatch_payload, appended_blocks)
+           VALUES ($1, $2, 'tool_use', 'turn_dispatched', $3::jsonb, '[]'::jsonb)`,
+          [runId, seq, JSON.stringify(request)],
+        ),
+      );
+
+      // 步 2：HTTP（agentclient 内 AbortController 到时取消 → TURN_TIMEOUT）
+      let turn: AgentTurnResponse | undefined;
+      let rawBody: string | null = null;
+      let errCode: string | null = null;
+      try {
+        turn = await deps.agentClient.callTurn(request);
+      } catch (err) {
+        if (err instanceof AgentClientError) {
+          errCode = err.protocolErrorCode;
+          rawBody = err.rawBody !== undefined ? clipRaw(err.rawBody) : null;
+        } else {
+          errCode = 'TURN_TIMEOUT';
+        }
+      }
+
+      if (errCode !== null || turn === undefined) {
+        const { streakHit } = await recordProtocolError(runId, seq, errCode ?? 'TURN_TIMEOUT', rawBody, false);
+        if (streakHit) {
+          const end = await tx(deps.pool, (c) =>
+            endAgentRun(c, { runId, status: 'failed', endReason: 'protocol_errors' }),
+          );
+          if (end.nextRunId !== undefined) startAgentRun(end.nextRunId);
+          return;
+        }
+        continue;
+      }
+
+      // 步 3：合法形状响应 → turn_received + raw_response（≤2KB）+ streak 清零
+      const received = await tx(deps.pool, async (client) => {
+        const { rowCount } = await client.query(
+          `UPDATE agent_run_step SET status='turn_received', raw_response=$3, updated_at=now()
+           WHERE run_id=$1 AND seq=$2 AND status='turn_dispatched'`,
+          [runId, seq, clipRaw(rawBody ?? JSON.stringify(turn))],
+        );
+        if (rowCount !== 1) return false;
+        await client.query(
+          `UPDATE agent_run SET protocol_error_streak=0, step_count=step_count+1, updated_at=now() WHERE id=$1`,
+          [runId],
+        );
+        return true;
+      });
+      if (!received) continue; // 晚到响应丢弃（该轮已按 TURN_TIMEOUT 落库）
+
+      if (turn.stopReason === 'end_turn') {
+        // 结束路径：step kind='final' + appended assistant text；run finished/final（不发群）
+        const end = await tx(deps.pool, async (client) => {
+          await client.query(
+            `UPDATE agent_run_step SET kind='final', status='done',
+                    appended_blocks=$3::jsonb, updated_at=now()
+             WHERE run_id=$1 AND seq=$2`,
+            [runId, seq, JSON.stringify([{ role: 'assistant', content: [turn.block] }])],
+          );
+          return endAgentRun(client, {
+            runId,
+            status: 'finished',
+            endReason: 'final',
+            summary: turn.block.text,
+          });
+        });
+        if (end.nextRunId !== undefined) startAgentRun(end.nextRunId);
+        return;
+      }
+
+      // 合法 tool_use 块：重复 id → DUPLICATE_TOOL_USE_ID（路径 B）；未知名/入参不符 → 路径 A
+      const tool = turn.block;
+      const dup = await tx(deps.pool, async (client) => {
+        const { rows } = await client.query(
+          'SELECT 1 FROM agent_run_step WHERE run_id=$1 AND tool_use_id=$2',
+          [runId, tool.id],
+        );
+        return rows.length > 0;
+      });
+      if (dup) {
+        const { streakHit } = await recordProtocolError(runId, seq, 'DUPLICATE_TOOL_USE_ID', null, true);
+        if (streakHit) {
+          const end = await tx(deps.pool, (c) =>
+            endAgentRun(c, { runId, status: 'failed', endReason: 'protocol_errors' }),
+          );
+          if (end.nextRunId !== undefined) startAgentRun(end.nextRunId);
+          return;
+        }
+        continue;
+      }
+
+      const assistantBlock = [{ role: 'assistant', content: [{ type: 'tool_use', id: tool.id, name: tool.name, input: tool.input }] }];
+      const schemaError = validateToolInput(tool.name, tool.input);
+      if (!AGENT_TOOL_NAMES.has(tool.name)) {
+        await appendToolResult(runId, seq, tool.id, assistantBlock, {
+          content: JSON.stringify({ code: 'UNKNOWN_TOOL', message: `unknown tool: ${tool.name}` }),
+          isError: true,
+          errorCode: 'UNKNOWN_TOOL',
+        });
+        continue;
+      }
+      if (schemaError !== null) {
+        await appendToolResult(runId, seq, tool.id, assistantBlock, {
+          content: JSON.stringify({ code: 'INVALID_INPUT', message: schemaError }),
+          isError: true,
+          errorCode: 'INVALID_INPUT',
+        });
+        continue;
+      }
+
+      // 步 4：效果/读工具分发前落 tool_use 意图（tool_use_id/name/input 同行）；
+      //       finish 内置收束（§7.4）；其余经 executeTool 缝（T-P4-07..09 接管）
+      await tx(deps.pool, (c) =>
+        c.query(
+          `UPDATE agent_run_step SET tool_use_id=$3, name=$4, input=$5::jsonb, updated_at=now()
+           WHERE run_id=$1 AND seq=$2`,
+          [runId, seq, tool.id, tool.name, JSON.stringify(tool.input ?? null)],
+        ),
+      );
+
+      if (tool.name === 'finish') {
+        const input = tool.input as Record<string, unknown> | undefined;
+        const summary = typeof input?.['summary'] === 'string' ? input['summary'] : '';
+        const end = await tx(deps.pool, async (client) => {
+          await client.query(
+            `UPDATE agent_run_step SET kind='final', status='done', result_summary='ok',
+                    appended_blocks=$3::jsonb, updated_at=now()
+             WHERE run_id=$1 AND seq=$2`,
+            [runId, seq, JSON.stringify(assistantBlock)],
+          );
+          return endAgentRun(client, { runId, status: 'finished', endReason: 'final', summary });
+        });
+        if (end.nextRunId !== undefined) startAgentRun(end.nextRunId);
+        return;
+      }
+
+      const toolExec = deps.executeTool;
+      const outcome = toolExec !== undefined
+        ? await tx(deps.pool, (c) =>
+            toolExec({ client: c, runId, groupId: run.group_id, stepSeq: seq, toolName: tool.name, input: tool.input }),
+          )
+        : { type: 'result' as const, content: JSON.stringify({ code: 'UNKNOWN_TOOL', message: 'tool executor not wired' }), isError: true };
+
+      if (outcome.type === 'end_run') {
+        const end = await tx(deps.pool, async (client) => {
+          const blocks = outcome.toolResult !== undefined
+            ? [...assistantBlock, { role: 'user', content: [{ type: 'tool_result', tool_use_id: tool.id, content: outcome.toolResult.content, is_error: outcome.toolResult.isError ?? false }] }]
+            : assistantBlock;
+          await client.query(
+            `UPDATE agent_run_step SET status='done', appended_blocks=$3::jsonb,
+                    result_summary=$4, updated_at=now()
+             WHERE run_id=$1 AND seq=$2`,
+            [runId, seq, JSON.stringify(blocks), outcome.resultSummary ?? null],
+          );
+          return endAgentRun(client, {
+            runId,
+            status: outcome.status,
+            endReason: outcome.endReason,
+            summary: outcome.summary,
+          });
+        });
+        if (end.nextRunId !== undefined) startAgentRun(end.nextRunId);
+        return;
+      }
+      // 正常 tool_result：与 step 完成同事务（§3 第 4 条）
+      await appendToolResult(runId, seq, tool.id, assistantBlock, {
+        content: outcome.content,
+        isError: outcome.isError ?? false,
+        resultSummary: outcome.resultSummary,
+      });
+    }
+  }
+
+  /** 路径 A / 工具结果写回：assistant 块 + tool_result 块同事务，status='done' */
+  async function appendToolResult(
+    runId: string,
+    seq: number,
+    toolUseId: string,
+    assistantBlock: unknown[],
+    result: { content: string; isError: boolean; errorCode?: string; resultSummary?: string },
+  ): Promise<void> {
+    await tx(deps.pool, (c) =>
+      c.query(
+        `UPDATE agent_run_step SET status='done', appended_blocks=$3::jsonb,
+                is_error=$4, error_code=$5, result_summary=$6, updated_at=now()
+         WHERE run_id=$1 AND seq=$2`,
+        [
+          runId,
+          seq,
+          JSON.stringify([
+            ...assistantBlock,
+            { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: result.content, is_error: result.isError }] },
+          ]),
+          result.isError,
+          result.errorCode ?? null,
+          (result.resultSummary ?? result.content).slice(0, MAX_RESULT_SUMMARY_CHARS),
+        ],
+      ),
+    );
+  }
+
+  return {
+    startRun(runId: string): void {
+      pending.push(runId);
+      pump();
+    },
+  };
+}
+
+const MAX_RESULT_SUMMARY_CHARS = 200; // resultSummary ≤200 字（REQ §2.3 行）
+
+/** input_schema.required 全覆盖的最小校验（T-P4-06 细化 schema 语义） */
+function validateToolInput(name: string, input: unknown): string | null {
+  const def = AGENT_TOOLS.find((t) => t.name === name);
+  if (def === undefined) return `unknown tool: ${name}`;
+  const required = (def.input_schema as { required?: string[] }).required ?? [];
+  if (typeof input !== 'object' || input === null) return `missing input for ${name}`;
+  for (const key of required) {
+    if ((input as Record<string, unknown>)[key] === undefined) {
+      return `missing required param: ${key}`;
+    }
+  }
+  return null;
+}
