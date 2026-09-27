@@ -40,6 +40,8 @@ import { startAgentRun } from './trigger.js';
 import { execGetRecentMessages } from './tools/query.js';
 import { execFinish } from './tools/finish.js';
 import { execSendMessage, sendMessagePreAudit, type DeliveryWaiter } from './tools/send-message.js';
+import { execKickUser, kickPreAudit } from './tools/kick.js';
+import type { GatewayClient } from '../../gateway/client.js';
 
 
 
@@ -93,6 +95,10 @@ export interface AgentExecutorDeps {
   readonly executeTool?: ToolExecutor;
   /** send_message 的 5s 落定等待器注入缝（测试可替；默认轮询 message 表） */
   readonly deliveryWaiter?: DeliveryWaiter;
+  /** kick_user 的网关通道（boot 注入真 GatewayClient；测试注入假实现） */
+  readonly gateway?: GatewayClient;
+  /** kick 504 后 2s 收敛等待注入缝（测试注入即时；默认 KICK_CONVERGE_MS 真等待） */
+  readonly kickConvergeWait?: () => Promise<void>;
 }
 
 interface RunRow {
@@ -389,6 +395,20 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         ),
       );
 
+      // kick_user 门槛 1 在审计前（§8.4 顺序逐字）：auto_kick_enabled=false → POLICY_DENIED
+      if (tool.name === 'kick_user') {
+        const denied = await tx(deps.pool, (c) => kickPreAudit(c, run.group_id));
+        if (denied !== undefined) {
+          await appendToolResult(runId, seq, tool.id, assistantBlock, {
+            content: denied.type === 'result' ? denied.content : '{}',
+            isError: true,
+            errorCode: 'POLICY_DENIED',
+            resultSummary: denied.type === 'result' ? denied.resultSummary : undefined,
+          });
+          continue;
+        }
+      }
+
       // send_message 的幂等预检在审计前（§8.2 KEY 分支逐字：命中即短路、不再审计）
       if (tool.name === 'send_message') {
         const hitOutcome = await tx(deps.pool, (c) =>
@@ -398,9 +418,13 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
           ),
         );
         if (hitOutcome !== undefined) {
+          const content = hitOutcome.type === 'result' ? hitOutcome.content : '{}';
+          let hitCode: string | undefined;
+          try { const c = (JSON.parse(content) as { code?: string }).code; hitCode = typeof c === 'string' ? c : undefined; } catch { /* noop */ }
           await appendToolResult(runId, seq, tool.id, assistantBlock, {
-            content: hitOutcome.type === 'result' ? hitOutcome.content : JSON.stringify({ code: 'SEND_TIMEOUT', message: 'unreachable' }),
+            content,
             isError: hitOutcome.type === 'result' ? (hitOutcome.isError ?? false) : true,
+            errorCode: hitCode,
             resultSummary: hitOutcome.type === 'result' ? hitOutcome.resultSummary : undefined,
           });
           continue;
@@ -562,6 +586,12 @@ const defaultToolExecutor = (execDeps: AgentExecutorDeps): ToolExecutor => async
   }
   if (ctx.toolName === 'send_message') {
     return execSendMessage(ctx, { pool: execDeps.pool, waiter: execDeps.deliveryWaiter });
+  }
+  if (ctx.toolName === 'kick_user') {
+    if (execDeps.gateway === undefined) {
+      return { type: 'result', content: JSON.stringify({ code: 'SEND_FAILED', message: 'gateway not wired' }), isError: true };
+    }
+    return execKickUser(ctx, { gateway: execDeps.gateway, pool: execDeps.pool, convergeWait: execDeps.kickConvergeWait });
   }
   return {
     type: 'result',

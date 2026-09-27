@@ -133,6 +133,7 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
       logger,
       instanceId: `pid-${process.pid}`,
       maxConcurrentRuns: config.agentMaxConcurrentRuns,
+      gateway,
     }),
   );
   const app = await buildApp({
