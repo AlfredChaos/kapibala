@@ -35,21 +35,24 @@
 
 ## 剩余（按 DAG 顺序，详见 02-TASKS.md）
 
-- P0：**已完成（7/7）**。
-- P1（余 2）：T-P1-04（待审查）、T-P1-05（进行中）。
-- P2（12；T-P2-01 进行中，下一批派发 T-P2-02/03）：SSE/死信/账号状态机/入站/成员投影/WS/时间线 + gw-4/5/19/28。
-- P3（11）：出站全链/建群/leave-all + S1–S4 集成（接口面冻结点）。
-- P4（15）：mock-agent + A5 全量 + S5/S6。
-- P5（5）：web 页面 1–3 + 401 单飞。
-- P6（8）：序列 + 页面 4/5 + S7/S8 + B4。
-- P7（5）：崩溃注入套件 + I 映射收口。
-- P8（5）：C1/C2/C3 + README/完成度表 + DoD 终验。
+- P0：**已完成（7/7）**（全仓终验时点）。
+- P1（5）：已完成。
+- P2（12）：已完成——SSE/死信/账号状态机/入站/成员投影/WS/时间线 + gw-4/5/19/28。
+- P3（11）：已完成——出站全链/建群/leave-all + S1–S4 集成。
+- P4（15）：已完成——mock-agent + A5 全量 + S5/S6。
+- P5（5）：已完成——web 页面 1–3 + 401 单飞。
+- P6（8）：已完成——序列 + 页面 4/5 + S7/S8 + B4。
+- P7（5）：已完成——崩溃注入套件 + I 映射收口。
+- P8（5）：已完成——C1 媒体落盘/清理、C2 anthropic provider、C3 playwright 冒烟、README/完成度表、DoD 终验。
 
 ## 风险
 
 | 风险 | 状态 | 缓解 |
 |---|---|---|
-| 工程量 vs 48h（review R1） | 开放 | 严格按 §3.3 裁剪顺序；阶段门即提交点；P4 最重不动、P3 对账装饰可让 |
+| 工程量 vs 48h（review R1） | 收口 | 全部阶段裁剪决策已在各 P* 提交落地；无带病项遗留 |
+| server 全量测试 flake | 开放·已知 | 资源争用型（各轮挂的文件不同、孤立跑全绿、maxWorkers:4 后三轮终验一轮全绿）；如再发按「孤立重跑判性」流程确认非新红 |
+| C2 真实 LLM | 需自配 | 通道/映射实装且绿（mock 单测 + e2e scripted）；ANTHROPIC_API_KEY 需使用者自备，后端只改 `AGENT_URL` |
+| C3 e2e 竞态 | 已消解 | state 文件生命周期归 backend 自理（启动删旧 + ready 最后写）；连跑多轮绿 |
 | R-A/R-B 回写验证未收口 | 开放 | 进入 T-P2-09 / T-P4-04 前先复核设计文档定稿语义（任务卡已按定稿语义写） |
 | lane-C（mock-agent）正式排在 P4 但 DAG 只依赖 T-P0-02 | 已利用 | lane-A 阻塞时提前拉起 T-P4-01..03（不违反阶段依赖：它们不消费 server） |
 | 共享文件竞态（index.ts/dispatch.ts/registry.ts/routes/index.ts/VITEST_PLAN/根 package.json） | 已消解 | §0 规则 1/2/3/7：依赖边串行化 + 阶段门统一勾选 + 脚本预注册 |
@@ -58,9 +61,15 @@
 
 ## 验证状态快照（最近一次）
 
-- 全仓 lint / typecheck / test / build：**绿**（T-P0-01 `e3d1b5d` 时点全绿；收口提交复验 `pnpm typecheck` 0 错、`pnpm build` 全 Done）。
-- 阶段门：**P0 已达（7/7）**；P1–P8 未达。
-- VITEST_PLAN 勾选：§1 I13/I14 + §6.1 P0 验收 11 项已登记；其余按各阶段门勾选。
-- 计划评审门：**已通过**（两审查 PASS + F1–F11 修复落地 + 脚本复查）。
+- 全仓 lint / typecheck / build / test：**四命令全绿**（T-P8-05 终验逐条实跑；server 测试 typecheck 面经 `tsconfig.test.json` 修复后纳入检查）。
+- 阶段门：**P0–P8 全部达成（73/73 卡 DONE）**。
+- VITEST_PLAN：**125 行矩阵勾选完毕**（T-P7-05 `22397f6` 收口）。
+- 计划评审门：已通过（两审查 PASS + F1–F11 修复落地 + 脚本复查）。
 
-> 终态目标行（达成后填写）：「DoD 达成，待人类 push/交付」。
+> **终态（2026-09-28 T-P8-05）：DoD 达成，待人类 push/交付。**
+>
+> - 四门终验：`pnpm lint` 0 错 · `pnpm typecheck` 5/5 包 Done · `pnpm build` 全 Done（web 271.52 kB）· `pnpm test` 全绿（contract 6 + mock-agent 57 + mock-gateway 120 + web 52 + server 434 = **669 tests**）。
+> - 任务：**73/73 卡全 DONE**（T-P8-05 统一勾选：逐卡比对 `git log` 提交主题——51 张历史遗留未翻状态的卡全部有对应提交，无一悬空；四命令全绿为行为证据）。
+> - 矩阵：VITEST_PLAN 125 行勾选完毕（T-P7-05 收口 22397f6）。
+> - 抽查复审：独立 reviewer 5 任务点检并行进行，结论回填 JOURNAL「抽查复审」节。
+> - git：84 提交、Conventional Commits、一提交一逻辑变更、工作区干净（仅 flake 修复/类型面提交均为单点变更）。

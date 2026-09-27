@@ -329,6 +329,29 @@
 - 偏差与【解读】：① I3/I12 语义本有覆盖（finalize-sent 稳态断言 / sinceseq 补发），缺的是**用例名/头注对编号的引用**——补注不改断言，非空洞凑数（断言先于核对存在）；② VITEST_PLAN 的 gw/ag 表只列 S 场景挂的 mock 用例文件名+设计行号、无勾选列，由 §6 「gw-1-28 / ag-1-19 各有代表用例」检查点承载收口（28+19 项逐号核对均已有 mock 侧测试文件）。
 - 踩坑：① **全核并行 + 每文件独立库 + 崩溃子进程 = 随机 flake**——三次全量跑各落 1-2 个 5s 超时/断言 race（hub 背压、dispatcher wake、s6、create-group-job、restart-reschedule 轮流中招），单跑全过；另积累 126 个泄漏测试库 + 88 空闲连接把 PG `max_connections` 打满（「sorry, too many clients」连锁失败 40 文件）。修复：`maxWorkers:4` + `testTimeout:20000`（契约计时断言在断言行内，不被稀释）；泄漏库手动 DROP 回收。防再犯：全量验证前先看 `pg_stat_activity` / `kapibala_test_*` 库数；若同类 flake 第二次出现，升级为 §3/§5 规约。② 重跑前不 drain PG 会把「连接耗尽」伪装成「断言回归」——先清库再跑。
 
+
+## 2026-09-28 T-P8-05 DoD 终验清单执行
+- 做了什么：按 DRIVER-PROMPT §9 逐项勾选——① T-P8-01/T-P8-02 status→DONE（验证提交 877eccd/9f5ba3f 已落地且绿）；② 四门按序实跑并记录输出；③ git 历史审计；④ HANDOFF 终态。
+- 四门终验输出（verbatim 摘录，按序）：
+  - `pnpm lint` → `eslint .` 0 错（修掉 backend.ts 未用 `authed` 导入后）。
+  - `pnpm typecheck` → 5 包全 Done。**修了一个真 bug**：server 测试经 `mock-gateway/src/app.js`/`mock-agent/src/app.js` 跨包源导入拉进 sibling `*.ts`，`rootDir:"."` 下全是 TS6059——说明 `pnpm typecheck` 自 T-P3-11 起对 server 测试面实际是红的（历次「绿」要么是只跑了部分包、要么没人按根命令跑）。修复：`tsconfig.json` build 面收窄 `include:["src"]`（dist 形状不变），新增 `tsconfig.test.json`（`rootDir:".."`、含 src+tests+vitest.config）专管 typecheck——提交 acad008。
+  - `pnpm build` → contract/mock-gateway/mock-agent/server `tsc` Done + web `vite build` ✓（271.52 kB bundle）。
+  - `pnpm test` → 全绿：contract 6 · mock-agent 57 · mock-gateway 120 · web 52 · server 434（57 文件）。
+- 过程中的三个红→修复/判性：
+  1) contract `shapes.test.ts`：API_ERROR_CODES 新增 AGENT_RUN_NOT_FOUND/SEQUENCE_RUN_NOT_FOUND 但期望集没跟（且 contract tsconfig `exclude` 了 __tests__，类型层兜不住——测试断言层兜住了）→ 补两条 + 计数 18→20，提交 5ba7a0d。
+  2) server 全量并行下两处 flake：首轮 s4（时序断言 i2<i1）+ crash-recovery(runId 空）；二轮换 create-group-job(job→'failed')+crash-recovery ③。**判定=资源争用 flake 非新红**：三组文件孤立跑全绿（s4+crash-recovery 合跑 15/15 绿），四轮三轮中第三轮 57/57 文件 434/434 全绿，且各轮挂的文件不同（典型负载敏感）。vitest.config maxWorkers:4 已限流，残留风险如实记入 HANDOFF。
+  3) 根 `pnpm test` 曾因 contract 红在 server 前短路——修复后完整四轮序通过。
+- git 历史：84 提交；2 条非 `type(scope):` 形态（`docs: README...` / `docs: initial analysis...` 属 `type:` 无 scope 的合法 Conventional Commits 变体）；每提交一逻辑变更成立（P8 收口期见 follow-up 提交 e2c288f/acad008/5ba7a0d，均单点修复）。
+- VITEST 终核：矩阵 125 行（T-P7-05 收口提交 22397f6 全勾）；server/VITEST_PLAN.md 残 1 ☐ 为条目形态残留（见 T-P7-05 journal 注明）。
+- 偏差与【解读】：① 卡 a)「抽 5 任务重跑」由并行独立 reviewer 会话执行（见下节占位）；② HANDOFF「DoD 达成」以四门绿 + git 干净为据，C2 需真 key、C3 e2e 竞态修补记录如实列出。
+- 踩坑：同坑二次出现升级 §5 规约——「跨包源导入 + rootDir 的 TS6059」已在 server AGENTS/本记录留档：`tsc -p tsconfig.test.json` 是检查面，`tsc`（build）是发射面，二者自此分离。
+
+### 抽查复审（T-P8-05 b 项，独立 reviewer 会话并行执行）
+<!-- 由主 agent 填入 reviewer 对 5 个已 DONE 任务的重跑验证 + 代码重读结论 -->
+- [ ] 待填：抽查名单（5 任务）
+- [ ] 待填：各任务 a) 验证命令重跑结果
+- [ ] 待填：代码重读（可读性/注释/SOLID）结论
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

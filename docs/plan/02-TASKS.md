@@ -153,7 +153,7 @@
   d) 时序默认区间随机、`/_test/scenario` 可钉死（DES/14 §3）；无 any
   e) 无 VITEST 行（server 侧联测归 P3）
 
-### T-P1-04 send / kick / leave / members / by-client-id 端点            [status: TODO]
+### T-P1-04 send / kick / leave / members / by-client-id 端点            [status: DONE]
 - goal: `POST /groups/:id/send`（202 可能 1–2s + message_sent 50–2000ms / message_failed 两码）、kick（1–5s、200 前移除成员、随后 member_left、504 收敛）、leave（200 + member_left / 500）、`GET /members` 即时性、`GET /messages/by-client-id/:clientMsgId`（200 最早一条/404）、`GET /media/:id` 存根（404 直至 gw-27）、message 事件全量回流（S3 默认行为）。
 - refs: DES/14-gateway-service.md §2–§3、§5 注（S3 非开关）；REQ §2.1 发消息节；QR §1
 - owned: mock-gateway/src/messaging.ts、mock-gateway/src/media.ts、mock-gateway/tests/messaging.test.ts
@@ -166,7 +166,7 @@
   d) message 状态模型按 clientMsgId → **有序列表**（R-F 定稿语义）；sentAt 毫秒精度；无 any
   e) 无 VITEST 行
 
-### T-P1-05 S1/S2 驱动开关（gw-1/2/3）与 counters 断言            [status: TODO]
+### T-P1-05 S1/S2 驱动开关（gw-1/2/3）与 counters 断言            [status: DONE]
 - goal: 落地 gw-1 `send_accept_slow`、gw-2 `message_sent_delay`（钉值）、gw-3 `dup_push_all`（每事件推两次）+ counters（sendCallsByAccount/sendCallsByClientMsgId/landedMessages/kickCalls/framesEmitted）完备性测试。
 - refs: DES/14-gateway-service.md §4–§5（#1/2/3 行）；VITEST_PLAN §2 S1/S2 行
 - owned: mock-gateway/src/switches/basic.ts、mock-gateway/tests/switches-basic.test.ts
@@ -183,7 +183,7 @@
 
 # P2 · A2 入站 + A1 状态机 + A4 时间线（12 任务）
 
-### T-P2-01 server 网关 client（gateway/）            [status: TODO]
+### T-P2-01 server 网关 client（gateway/）            [status: DONE]
 - goal: server 侧唯一网关出口：全部端点封装、显式超时（普通 10s / kick 6s / send 8s / by-client-id 5s）、HTTP 错误 → 类型化 `{status, code, body}` 异常、响应浅校验、SSE 流消费接口、media 下载接口。
 - refs: DES/01-architecture.md §4.4、§6.5、§8；REQ §2.1；DES/14-gateway-service.md §7
 - owned: server/src/gateway/**、server/tests/gateway-client.test.ts
@@ -196,7 +196,7 @@
   d) client 不做业务决策；全部超时值来自 constants.ts（标注 DES/01 §4.4 出处）；无 any
   e) 无 VITEST 行（被各域用例间接覆盖）
 
-### T-P2-02 调度器/恢复器骨架与启动时序            [status: TODO]
+### T-P2-02 调度器/恢复器骨架与启动时序            [status: DONE]
 - goal: `scheduler/`（1s 周期扫描注册表 registry.ts）+ `recovery/`（六扫描骨架，按 DES/10 §3 顺序）+ 启动时序（迁移检查→恢复登记→SSE 异步→调度器→HTTP 监听最后，恢复=登记+异步交接 D3-2）。
 - refs: DES/01-architecture.md §3、§4.6、§7；DES/10-reliability.md §2–§3
 - owned: server/src/scheduler/**（index.ts、registry.ts）、server/src/recovery/**（index.ts、scans.ts）、server/src/index.ts（启动编排，共享串行文件）、server/tests/boot-order.test.ts
@@ -209,7 +209,7 @@
   d) 调度动作全部条件更新可重复触发（幂等吸收）；无进程内正确性判定（宪法 §3-5）
   e) 无 VITEST 行
 
-### T-P2-03 SSE 消费循环 + 连续前缀游标            [status: TODO]
+### T-P2-03 SSE 消费循环 + 连续前缀游标            [status: DONE]
 - goal: 消费循环（全局单飞 advisory lock `events:consumer`）、`event_cursor` 连续前缀推进、断线退避重连（500ms 起上限 5s、since 恒读库）、首部署不带 since、事件分发骨架 dispatch.ts。
 - refs: DES/08-realtime-module.md §1.1、§1.3；DES/02-data-model.md §1.2；REQ §2.1 事件流；QR §1（≤1s 乱序窗口）
 - owned: server/src/events/consumer.ts、server/src/events/cursor.ts、server/src/events/dispatch.ts、server/tests/events/cursor-prefix.test.ts、server/tests/events/resume.test.ts
@@ -222,7 +222,7 @@
   d) 游标只在事务内推进；重连 since 从不用内存值；无 any
   e) VITEST 行 I8、A2-6、G-19 登记应勾
 
-### T-P2-04 死信三写事务 + 孤儿事件分流 + 重试            [status: TODO]
+### T-P2-04 死信三写事务 + 孤儿事件分流 + 重试            [status: DONE]
 - goal: 主事务失败 → 死信事务（三写同事务：补账本 + INSERT pending_event + 推进游标，D1-1）→ inconsistency 事件 → 消费不中断；调度器 5s 重试（指数退避上限 5min、20 次 → dead_letter_stuck）；孤儿群/孤儿账号事件分流（D3-1）。
 - refs: DES/08-realtime-module.md §1.2、§1.4；DES/10-reliability.md E14 相关；VITEST_PLAN §5 D1-1/D3-1 行
 - owned: server/src/events/deadletter.ts、server/src/events/orphan.ts、server/src/scheduler/deadletter-scan.ts（注册行）、server/tests/events/dead-letter.test.ts
@@ -235,7 +235,7 @@
   d) 死信事务必须三写同事务（只写死信会 FK 违例，DES/08 §1.2）；永不丢事件；无 any
   e) VITEST 行 D1-1/D3-1/A2-5 登记应勾
 
-### T-P2-05 账号状态机 + connect / transition 端点            [status: TODO]
+### T-P2-05 账号状态机 + connect / transition 端点            [status: DONE]
 - goal: `transitions.ts` 15 条合法边集中定义；`enterTerminal` 幂等入口；connect（前置 {idle,disconnected}，先调网关后落库）；transition 三段式判定（400→404→ILLEGAL_TRANSITION→CAS_CONFLICT）+ disconnect 补调；`GET /api/accounts`。
 - refs: DES/03-account-module.md §1–§3、§6；REQ §2.3 账号行、A1；QR §4、§6
 - owned: server/src/modules/accounts/**（transitions.ts、connect.ts、transition.ts、list.ts）、server/src/http/routes/accounts.ts（+index 注册行）、server/tests/accounts/state-machine.test.ts、server/tests/accounts/transition.test.ts
@@ -248,7 +248,7 @@
   d) 判定顺序与 §2.3 错误码语义一致（静态 ILLEGAL 先于 CAS）；CAS 全部条件 UPDATE rowcount 判定；无 any
   e) VITEST 行 I5、D3-4、A-03/04/05、A1-1/2/4 登记应勾
 
-### T-P2-06 终态原子副作用 enterTerminal（D1-2 收窄）            [status: TODO]
+### T-P2-06 终态原子副作用 enterTerminal（D1-2 收窄）            [status: DONE]
 - goal: 三来源（同步错误 / account_status 事件 / 操作员）汇聚单一 `enterTerminal`：单事务六动作；取消范围收窄为 `queued AND first_attempt_at IS NULL`；在途行转 unknown 判定；SSE account_status 事件接线（挂入 T-P2-03 建立的 dispatch 骨架）。
 - refs: DES/03-account-module.md §4（含细节 1/2）；DES/02-data-model.md §9；VITEST_PLAN §5 D1-2 行；REQ A1「进入终态时…」
 - owned: server/src/modules/accounts/terminal.ts、server/src/events/handlers/account-status.ts（+dispatch 注册行）、server/tests/accounts/terminal-side-effects.test.ts
@@ -261,7 +261,7 @@
   d) 副作用六动作不得拆事务（跨模块经 TxContext 回调，DES/03 §7）；无 any
   e) VITEST 行 I6、D1-2、A1-5、G-04 登记应勾
 
-### T-P2-07 限流登记 / 硬闸门 / 到期恢复（D2-5）            [status: TODO]
+### T-P2-07 限流登记 / 硬闸门 / 到期恢复（D2-5）            [status: DONE]
 - goal: 429 登记单事务（状态守卫 `WHERE status IN ('online','rate_limited')` + `greatest(now(), rate_limited_until) + retryAfterSeconds`）、闸门判定函数（挡在出站最外层）、到期扫描自动回 online（条件更新）。
 - refs: DES/03-account-module.md §5；VITEST_PLAN §5 D2-5 行；REQ A1/A2 RATE_LIMITED 行；QR §2
 - owned: server/src/modules/accounts/rate-limit.ts、server/src/scheduler/ratelimit-scan.ts（注册行）、server/tests/accounts/rate-limit.test.ts
@@ -274,7 +274,7 @@
   d) 闸门逐条查询不缓存（S4 的零试探根基）；disconnect/leave 不走闸门（A2）；无 any
   e) VITEST 行 D2-5、A1-3/7、G-15 登记应勾
 
-### T-P2-08 入站 message 投影 + isOwn 合并 + agent 触发入口            [status: TODO]
+### T-P2-08 入站 message 投影 + isOwn 合并 + agent 触发入口            [status: DONE]
 - goal: SSE `message` 事件处理：去重插入、own 检测（ownPlatformUserIds 集合）、回流合并（message_sent 先到则幂等跳过）、agent 触发判定（active+agentEnabled → INSERT run ON CONFLICT DO NOTHING → 否则 trigger_queue）。
 - refs: DES/05-messaging-module.md §3、§4.1–§4.2、§4.4；DES/02-data-model.md §5.1；REQ A2、S2/S3
 - owned: server/src/modules/messages/inbound.ts、server/src/modules/agent/trigger-entry.ts（触发判定的最小存根，T-P4-04 接管扩展）、server/src/events/handlers/message.ts（+dispatch 注册行）、server/tests/messages/inbound.test.ts
@@ -287,7 +287,7 @@
   d) 去重键与排序键以 DB 为真值（宪法 §3-3）；无 any
   e) VITEST 行 A2-3/4、S-02/03（入站半边）、G-20 登记应勾
 
-### T-P2-09 成员投影（D2-1 + R-A 定稿语义）            [status: TODO]
+### T-P2-09 成员投影（D2-1 + R-A 定稿语义）            [status: DONE]
 - goal: member_joined/member_left 事件投影：`last_event_id` 单调、墓碑行、复活分支先查 `terminal_at`（R-A）、TOMB 分支 `DO UPDATE SET last_event_id=GREATEST(...)`、外部成员不建行。
 - refs: DES/04-group-module.md §4（含 D2-1）；DES/02-data-model.md §4.2；VITEST_PLAN §5 D2-1 行（含 R-A 补充场景）
 - owned: server/src/modules/groups/members.ts、server/src/events/handlers/member.ts（+dispatch 注册行）、server/tests/groups/member-projection.test.ts
@@ -300,7 +300,7 @@
   d) 活跃性变更只在 `event_id > last_event_id` 时发生；无 any
   e) VITEST 行 D2-1（含 R-A 场景）、G-04/11 登记应勾
 
-### T-P2-10 WS hub + ws_event 表（I7/I12）            [status: TODO]
+### T-P2-10 WS hub + ws_event 表（I7/I12）            [status: DONE]
 - goal: `/ws` 端点：auth 帧验证（access token 查表）、`{type:'auth',success:true}` 回执后才推事件、`{seq,type,payload}` 帧、sinceSeq 补发（seq > sinceSeq 升序）、每连接 lastSentSeq 水位、心跳 30s、保留窗口清理、积压过期 `ws_backlog_expired`。
 - refs: DES/08-realtime-module.md §2 全文；DES/02-data-model.md §1.5；REQ §2.3 WS 行、A4/B4；QR §1（3s 行）
 - owned: server/src/ws/**、server/tests/ws/hub.test.ts、server/tests/ws/sinceseq.test.ts
@@ -313,7 +313,7 @@
   d) seq 由 BIGSERIAL 分配，不用内存计数；连接期 token 过期不断开（解读 #21）；无 any
   e) VITEST 行 I7、I12、A-18/19、A4-2、B4-1（服务端半边）登记应勾
 
-### T-P2-11 时间线游标分页（A4）            [status: TODO]
+### T-P2-11 时间线游标分页（A4）            [status: DONE]
 - goal: `GET /api/groups/:id/messages?before=&limit=50`：keyset 复合游标（base64(sent_at_epoch_ms + '.' + sort_key)）、`ORDER BY sent_at DESC, sort_key DESC`、nextCursor 语义、响应字段与 null 语义。
 - refs: DES/05-messaging-module.md §5 全文；REQ §2.3 messages 行；QR §1（50 行）
 - owned: server/src/modules/messages/timeline.ts、server/src/http/routes/messages.ts（+index 注册行）、server/tests/messages/timeline-pagination.test.ts
@@ -326,7 +326,7 @@
   d) 排序不用到达顺序；时间比较不用字符串；无 any
   e) VITEST 行 A-12、A4-1、G-03（排序半边）登记应勾
 
-### T-P2-12 mock-gateway 乱序/补投/延迟/外部成员开关（gw-4/5/19/28）            [status: TODO]
+### T-P2-12 mock-gateway 乱序/补投/延迟/外部成员开关（gw-4/5/19/28）            [status: DONE]
 - goal: 落地 gw-4 `reorder_1s`（相邻帧交换，含 message 先于 message_sent）、gw-5 `offline_backlog`（R-G 定稿：账号离线补投——新 eventId、原 msgId/sentAt，经 `/_test/emit` 配方生成）、gw-19 `member_joined_delay`（钉值）、gw-28 `external_member_events`。
 - refs: DES/14-gateway-service.md §5（#4/5/19/28 行）、§1（R-G 语义）；VITEST_PLAN §3.1 对应行
 - owned: mock-gateway/src/switches/timing.ts、mock-gateway/src/switches/backlog.ts、mock-gateway/tests/switches-timing.test.ts
@@ -343,7 +343,7 @@
 
 # P3 · A3 建群 + A2 出站 + B2 leave-all —— S1–S4（11 任务）
 
-### T-P3-01 操作员 send 端点与受理校验            [status: TODO]
+### T-P3-01 操作员 send 端点与受理校验            [status: DONE]
 - goal: `POST /api/groups/:id/send`：text 非空且 ≤ `TEXT_MAX_LENGTH`(2000)、群非 left、账号为活跃成员（否则 `409 ACCOUNT_NOT_IN_GROUP`）、账号非 {idle,disconnected,终态}（否则 `409 ACCOUNT_UNAVAILABLE`）、rate_limited 照常受理、INSERT queued + ws_event、返回 `202 {clientMsgId}`。
 - refs: DES/05-messaging-module.md §2.1.1、§6；DES/02-data-model.md §5.1；REQ §2.3 send 行；解读 #15/16
 - owned: server/src/modules/messages/accept.ts、server/src/http/routes/groups-send.ts（+index 注册行）、server/tests/messages/accept.test.ts
@@ -356,7 +356,7 @@
   d) client_msg_id 服务端生成；无 any
   e) VITEST 行 A-09、G-16（受理半边）登记应勾
 
-### T-P3-02 出站 dispatcher 与同步错误分流            [status: TODO]
+### T-P3-02 出站 dispatcher 与同步错误分流            [status: DONE]
 - goal: dispatcher 常驻循环：每账号 advisory lock 串行、取最早 `queued AND first_attempt_at IS NULL`（id 升序）、硬闸门、落 first_attempt_at 后调 send、八类响应分流（202/429/终态/GWF/SENDER/OFFLINE/504/503）。
 - refs: DES/05-messaging-module.md §2.1–§2.3；DES/03-account-module.md §5.2；DES/10-reliability.md E7；REQ A2 错误对照表；QR §2
 - owned: server/src/modules/messages/dispatcher.ts、server/src/scheduler/dispatch-wakeup.ts（注册行）、server/tests/messages/outbound-dispatcher.test.ts
@@ -369,7 +369,7 @@
   d) 闸门挡在最外层（宪法 §3-4）；同账号至多一条在途（§2.2）；无 any
   e) VITEST 行 A2-1/7/8/10、G-13/14、gw-15/16/17/10（测试侧）登记应勾
 
-### T-P3-03 unknown 判定器（5s 落定 / 2s 确认线 / 单次重发）            [status: TODO]
+### T-P3-03 unknown 判定器（5s 落定 / 2s 确认线 / 单次重发）            [status: DONE]
 - goal: 判定器：路径 A 等 message_sent、路径 B 自 unknown_since+2s 起每 500ms 探测 by-client-id；404 超 2s = 确认未发出；`resend_count=0` 才可重发（同 clientMsgId）；重发仍未发出 → `failed(NETWORK_TIMEOUT)`；503 期间保持 unknown。
 - refs: DES/05-messaging-module.md §2.4；REQ A2 第 2 条、§2.1 by-client-id；QR §1（5s/2s 行）
 - owned: server/src/modules/messages/adjudicator.ts、server/src/scheduler/unknown-scan.ts（注册行）、server/tests/messages/unknown-adjudicator.test.ts
@@ -382,7 +382,7 @@
   d) 探测节奏由调度器扫描 unknown_deadline_at 驱动（漏拍兜底）；resend_count CHECK (0,1) 是最后防线；无 any
   e) VITEST 行 I2、I9、A2-2、G-17/18、gw-7/8/9（测试侧）登记应勾
 
-### T-P3-04 finalizeSent 唯一收口（D1-3）+ message_sent/failed 事件            [status: TODO]
+### T-P3-04 finalizeSent 唯一收口（D1-3）+ message_sent/failed 事件            [status: DONE]
 - goal: 共享 `finalizeSent(clientMsgId, msgId, sentAt, tx)`：预检 → 常规回填 / 乱序合并（先删占位行再更新 M 行 + 审计字段迁移）→ 序列联动 → ws_event；message_sent/message_failed 事件处理接入。
 - refs: DES/05-messaging-module.md §2.5、§4.3 全文；DES/02-data-model.md §9；VITEST_PLAN §5 D1-3 行、I3 行
 - owned: server/src/modules/messages/finalize-sent.ts、server/src/events/handlers/confirm.ts（+dispatch 注册行）、server/tests/messages/finalize-sent.test.ts
@@ -395,7 +395,7 @@
   d) 所有确认途径（事件/by-client-id/未来）只走此函数（唯一收口）；agent 5s 等待按 client_msg_id 对合并透明；无 any
   e) VITEST 行 I3、D1-3、D3-5、S-01/03（确认半边）登记应勾
 
-### T-P3-05 建群 job 主流程 + GET /api/jobs            [status: TODO]
+### T-P3-05 建群 job 主流程 + GET /api/jobs            [status: DONE]
 - goal: `POST /api/groups` 受理（400/422/202 {jobId}）+ job 执行器主链（create→invite→join 并行→waiting_joins→promote→finished/group active）+ `GET /api/jobs/:jobId`（JOB_NOT_FOUND 404）。每步意图先落 phase/context 再外呼（E1–E4）。
 - refs: DES/04-group-module.md §2.1–§2.3、§7；DES/02-data-model.md §6.1；REQ §2.3、A3；QR §4
 - owned: server/src/modules/groups/create-job.ts、server/src/http/routes/groups.ts（+index 注册行）、server/src/http/routes/jobs.ts（+index 注册行）、server/tests/groups/create-group-job.test.ts
@@ -408,7 +408,7 @@
   d) join 不重发原则在恢复分支（本任务实现 phase 断点续传骨架）；advisory lock `job:<jobId>`；无 any
   e) VITEST 行 A-06/11、A3-1/2、G-05/07（主路径）登记应勾
 
-### T-P3-06 建群异常分支（B2 三行 / JOIN_TIMEOUT / promote≤2 / 崩溃续传）            [status: TODO]
+### T-P3-06 建群异常分支（B2 三行 / JOIN_TIMEOUT / promote≤2 / 崩溃续传）            [status: DONE]
 - goal: INVITE_NOT_READY 等 readyAfterMs 重试（不设限、检查 running）、INVITE_EXPIRED 重申一次、ALREADY_MEMBER 视为成功 + UPSERT 成员行（D2-2）、member_joined 10s 未到 → JOIN_TIMEOUT、NOT_MEMBER_YET 重试总调用 ≤2、phase/context 崩溃续传。
 - refs: DES/04-group-module.md §2.2 要点、§2.4；REQ B2 第 1 条、A2 表 NOT_MEMBER_YET 行；QR §1（10s、≤2 次行）、§4（JOIN_TIMEOUT）
 - owned: server/src/modules/groups/create-job-branches.ts、server/src/scheduler/join-timeout-scan.ts（注册行）、server/tests/groups/create-group-job-branches.test.ts
@@ -421,7 +421,7 @@
   d) promote 计数持久化不靠内存；join_deadline_at 恢复取 max(原值, now) 不重置窗口；无 any
   e) VITEST 行 B2-1、A2-11、G-06/07/08、gw-18/20/21/22/23（测试侧）、D2-2 登记应勾
 
-### T-P3-07 leave-all job（B2）            [status: TODO]
+### T-P3-07 leave-all job（B2）            [status: DONE]
 - goal: `POST /api/groups/:id/leave-all` → `202 {jobId}`；非群主串行先退、群主最后；失败记 errors[] 其余继续、群主不退、job failed；member_left 确认或 5s 后查成员列表核对；终局对账（服务账号集合 vs 网关列表）+ inconsistency；完成 → group left、members=[]。
 - refs: DES/04-group-module.md §3 全文；REQ §2.3 leave-all 行、B2 第 2/3 条；解读 #4/#5
 - owned: server/src/modules/groups/leave-all.ts、server/src/http/routes/groups-leave-all.ts（+index 注册行）、server/tests/groups/leave-all.test.ts
@@ -434,7 +434,7 @@
   d) 崩溃恢复不重发 leave（契约未定义重复 leave 行为）；无 any
   e) VITEST 行 A-10、B2-2/3、G-10/12、gw-26（测试侧）登记应勾
 
-### T-P3-08 群查询端点 + PATCH + GROUP_WRITE_FORBIDDEN 级联            [status: TODO]
+### T-P3-08 群查询端点 + PATCH + GROUP_WRITE_FORBIDDEN 级联            [status: DONE]
 - goal: `GET /api/groups(/:id)` 全字段组装（activeAgentRunId/activeSequenceRunId、creating 隐藏、left 后 members=[]）、`PATCH`（开关 + 关 agentEnabled 写取消请求标志）、`markGroupUnreachable` 单事务级联（群条件更新 + 序列 stopped + agent 取消请求 + 账号不动）。
 - refs: DES/04-group-module.md §1、§5；REQ §2.3 群行；A2 表 GWF 行；DES/02-data-model.md §7.1/§8.2
 - owned: server/src/modules/groups/query.ts、server/src/modules/groups/state.ts、server/src/http/routes/groups-patch.ts（+index 注册行）、server/tests/groups/group-state.test.ts
@@ -447,7 +447,7 @@
   d) 取消不改 run 状态（尊重「当前这一步结束后」，X-2 语义前置）；无 any
   e) VITEST 行 A-07/08、A2-9、gw-14（测试侧）登记应勾
 
-### T-P3-09 mock-gateway 出站类开关（gw-6..10/14..17/27）            [status: TODO]
+### T-P3-09 mock-gateway 出站类开关（gw-6..10/14..17/27）            [status: DONE]
 - goal: 落地 gw-6 `rate_limit`（429 + 期内任何 send 再 429 且计时重置）、gw-7 `send_504_land_1500`、gw-8 `send_504_not_sent`、gw-9 `by_client_id_503`、gw-10 `gateway_503_all`、gw-11/12/13 终态码与 account_status 事件、gw-14 `group_write_forbidden`、gw-15 `message_failed_event`、gw-16 `sender_not_in_group`、gw-17 `account_offline_409`、gw-27 `media_message`/`media_expire_404`。
 - refs: DES/14-gateway-service.md §5（#6–17、27 行）、§3；VITEST_PLAN §3.1
 - owned: mock-gateway/src/switches/outbound.ts、mock-gateway/src/switches/terminal.ts、mock-gateway/src/media.ts（充实）、mock-gateway/tests/switches-outbound.test.ts
@@ -460,7 +460,7 @@
   d) 429 的计时重置由网关侧实现（server 侧零试探是另一半）；不弱化任何契约行为；无 any
   e) VITEST 行 gw-6..17/27（落地侧）登记应勾
 
-### T-P3-10 mock-gateway 建群类开关（gw-18/20/21/22/23/26）            [status: TODO]
+### T-P3-10 mock-gateway 建群类开关（gw-18/20/21/22/23/26）            [status: DONE]
 - goal: 落地 gw-18 `member_joined_never`、gw-20 `invite_not_ready`、gw-21 `invite_expired`、gw-22 `already_member`（409 且不推事件）、gw-23 `promote_not_member_yet`（可配出现次数）、gw-26 `leave_500`。
 - refs: DES/14-gateway-service.md §5（#18/20–23/26 行）；VITEST_PLAN §3.1
 - owned: mock-gateway/src/switches/group-lifecycle.ts、mock-gateway/tests/switches-group.test.ts
@@ -473,7 +473,7 @@
   d) gw-22 不推事件是契约明文（server 侧 D2-2 依赖此行为）；无 any
   e) VITEST 行 gw-18/20/21/22/23/26（落地侧）登记应勾
 
-### T-P3-11 集成：S1–S4 场景用例 + demo 脚本（串行汇合点）            [status: TODO]
+### T-P3-11 集成：S1–S4 场景用例 + demo 脚本（串行汇合点）            [status: DONE]
 - goal: `tests/scenarios/s1..s4.test.ts`（真 PG + in-process 双 mock + server 子进程或进程内装配）+ `scripts/demo/s1..s4.ts`（一条命令编排：起环境→装开关→触发→断言 counters→输出摘要）。
 - refs: REQ §2.4 S1–S4 行；DES/14-gateway-service.md §8；VITEST_PLAN §2；analysis/09-scenarios.md
 - owned: server/tests/scenarios/s1.test.ts、s2.test.ts、s3.test.ts、s4.test.ts、server/tests/helpers/env.ts、scripts/demo/s1.ts、s2.ts、s3.ts、s4.ts
@@ -490,7 +490,7 @@
 
 # P4 · mock-agent scripted + A5 全量 —— S5/S6（15 任务）
 
-### T-P4-01 mock-agent 骨架 + scripted 默认剧本 + TOOLS_INVALID            [status: TODO]
+### T-P4-01 mock-agent 骨架 + scripted 默认剧本 + TOOLS_INVALID            [status: DONE]
 - goal: mock-agent 包可起：HTTP 契约层（tools 校验：恰好 4 个 + required 全覆盖 → 否则 `400 TOOLS_INVALID`）、`AGENT_MODE` 选择 provider、scripted 默认剧本（`get_recent_messages → send_message → finish`）、`/_test/scenario` 装剧本、`/agent/audit` 确定性 pass。
 - refs: DES/12-agent-service.md §2–§3、§6；REQ §2.2；DES/06-agent-module.md §6
 - owned: mock-agent/src/app.ts、mock-agent/src/providers/scripted.ts、mock-agent/src/scenario.ts、mock-agent/src/index.ts、mock-agent/tests/scripted.test.ts
@@ -503,7 +503,7 @@
   d) 不做任何业务决策；`Map<runId,游标>` 重启清零可接受（mock 定位）；无 any
   e) mock-agent 包内 AGENTS.md **只读核对**（偏差登记由 T-P8-04 统一改，或回 T-P4-01 串行处理；本任务不改）；无 VITEST 行（ag-19 在 T-P4-02）
 
-### T-P4-02 mock-agent 协议类开关（ag-1..7/17/19）            [status: TODO]
+### T-P4-02 mock-agent 协议类开关（ag-1..7/17/19）            [status: DONE]
 - goal: 落地 ag-1 `bad_json_raw`、ag-2 `bad_json_fenced`、ag-3 `bad_json_wrapped`、ag-4 `shape_invalid`、ag-5 `unknown_tool`、ag-6 `invalid_input`、ag-7 `duplicate_tool_use_id`、ag-17 `s6_sequence`、ag-19 `tools_invalid_probe`。
 - refs: DES/12-agent-service.md §7（#1–7、17、19 行）；REQ §2.2「可能出现的行为」；VITEST_PLAN §3.2
 - owned: mock-agent/src/switches/protocol.ts、mock-agent/tests/switches-protocol.test.ts
@@ -516,7 +516,7 @@
   d) 坏响应形态逐字对齐 REQ §2.2 定义，不弱化；无 any
   e) VITEST 行 ag-1..7/17/19（落地侧）登记应勾
 
-### T-P4-03 mock-agent 行为类开关（ag-8..16/18）            [status: TODO]
+### T-P4-03 mock-agent 行为类开关（ag-8..16/18）            [status: DONE]
 - goal: 落地 ag-8 `send_timeout_key_retry`、ag-9 `endless_tools`、ag-10 `repeat_get_recent`、ag-11 `huge_limit`、ag-12 `slow_turn`（~8s 可配）、ag-13 `hang_turn`、ag-14 `audit_500`、ag-15 `audit_bad_body`、ag-16 `audit_slow`/`audit_hang`、ag-18 `same_runid_redispatch`。
 - refs: DES/12-agent-service.md §7（#8–16、18 行）；REQ §2.2 行为清单；QR §1（~8s 行）
 - owned: mock-agent/src/switches/behavior.ts、mock-agent/tests/switches-behavior.test.ts
@@ -529,7 +529,7 @@
   d) audit 慢/挂为确定性时长；无 any
   e) VITEST 行 ag-8..16/18（落地侧）登记应勾
 
-### T-P4-04 agentclient + 触发/单飞行/END2/SWEEP（R-B 守卫）            [status: TODO]
+### T-P4-04 agentclient + 触发/单飞行/END2/SWEEP（R-B 守卫）            [status: DONE]
 - goal: `agentclient/`（turn/audit 封装 + 三段式校验接口）；触发完整链：入站触发（已有入口）、run 结束事务 END2 四步（含 R-B 守卫）、调度器 SWEEP 兜底（同守卫 + 积压保留）。
 - refs: DES/06-agent-module.md §2 全文（含 R-B 修订语义）、§12；DES/05-messaging-module.md §4.4；REQ A5-1；review §5.2 R-B
 - owned: server/src/agentclient/**、server/src/modules/agent/trigger.ts、server/src/modules/agent/trigger-entry.ts（接管 T-P2-08 存根并扩展，串行依赖已建）、server/src/modules/agent/end-run.ts、server/src/scheduler/trigger-sweep.ts（注册行）、server/tests/agent/trigger.test.ts、server/tests/agent/trigger-queue-guard.test.ts（VITEST_PLAN §5 R-B 行的名义用例文件）
@@ -542,7 +542,7 @@
   d) 守卫在 END2 第 3 步与 SWEEP 两处都必须存在（缺一即违约）；无 any
   e) VITEST 行 I4、A5-1、T-05、R-B 新增回归行登记应勾；`tests/agent/trigger-queue-guard.test.ts` 即 R-B 回归的落点（END2/SWEEP 守卫 + 守卫不过时积压保留、重新启用后 SWEEP 补处理）
 
-### T-P4-05 run executor 骨架 + turn 循环 + 三重预算            [status: TODO]
+### T-P4-05 run executor 骨架 + turn 循环 + 三重预算            [status: DONE]
 - goal: executor（拾取/租约/并发信号量）+ turn 循环（step 状态机 pending→turn_dispatched→turn_received→tool_dispatched→done，意图先行快照）+ 三重预算（12 步含结束步 / 60s 墙钟含审计停机不计 / 连续 3 次协议错误合法响应清零）+ tools 常量（恰 4 个 required 全覆盖）。
 - refs: DES/06-agent-module.md §2.1、§3、§5、§6；DES/01-architecture.md §6.5；REQ A5-2；QR §1
 - owned: server/src/modules/agent/executor.ts、server/src/modules/agent/budget.ts、server/src/modules/agent/tools-def.ts、server/tests/agent/turn-loop.test.ts、server/tests/agent/budget.test.ts
@@ -555,7 +555,7 @@
   d) 会话历史完全由 DB 重建（appended_blocks 拼接，无内存依赖）；无 any
   e) VITEST 行 A5-2、T-01/02、ag-12/13/19（测试侧）登记应勾
 
-### T-P4-06 三段式校验 + 协议错误两类分流            [status: TODO]
+### T-P4-06 三段式校验 + 协议错误两类分流            [status: DONE]
 - goal: 响应校验三层（HTTP 状态 → JSON 解析含围栏/夹文 → 形状：stop_reason/块数/类型一致）+ 路径 A（UNKNOWN_TOOL/INVALID_INPUT：追加 assistant 块 + is_error tool_result，清零 streak）+ 路径 B（BAD_JSON/DUPLICATE_TOOL_USE_ID/TURN_TIMEOUT：不追加 assistant 块，追加 user text `PROTOCOL_ERROR <code>: <一句话>`，计步计 streak）。
 - refs: DES/06-agent-module.md §4 全文；REQ A5-3、§2.2；VITEST_PLAN §3.2 ag-1..7
 - owned: server/src/modules/agent/validation.ts、server/src/modules/agent/protocol-errors.ts、server/tests/agent/protocol-errors.test.ts
@@ -568,7 +568,7 @@
   d) 协议错误步的 appended_blocks 只含 user text 块（无悬挂 tool_use）；无 any
   e) VITEST 行 A5-3、T-03/04/09/10、ag-1..7（测试侧）登记应勾
 
-### T-P4-07 审计门禁与 blocked            [status: TODO]
+### T-P4-07 审计门禁与 blocked            [status: DONE]
 - goal: send_message/kick_user 执行前 `/agent/audit`（text 定义：send=待发文本；kick=`JSON.stringify({action:'kick',platform_user_id,reason})`）；verdict 恰为 `pass` 才执行；`fail` → AUDIT_REJECTED；无结论重试至多 **3 次**（单次失败不返回不计步、耗时计 60s）；3 次无结论 → run `blocked/audit_blocked` + ws_event。
 - refs: DES/06-agent-module.md §8.1、§8.3、§5（墙钟交互）；REQ A5-4；解读 #8（audit 单次超时 5s）
 - owned: server/src/modules/agent/audit.ts、server/tests/agent/audit.test.ts（重试/blocked 机制用例；VITEST ag-14..16 行的 blocked 分支断言位于 tools-send-message.test.ts，归 T-P4-09——文件名微调依据 VITEST_PLAN 头注，编号引用不变）
@@ -581,7 +581,7 @@
   d) verdict 判定「合法 JSON 且字段精确匹配 'pass'」；单次 audit 超时 5s（constants 标注解读 #8）；无 any
   e) VITEST 行 A5-4、T-13、ag-14..16（测试侧）登记应勾
 
-### T-P4-08 工具：get_recent_messages + finish            [status: TODO]
+### T-P4-08 工具：get_recent_messages + finish            [status: DONE]
 - goal: get_recent_messages（limit=min(limit,50) 钳制不报错、升序含触发消息与 run 期间新消息、单条 text 超 **500 字**截断置 truncated、整体 ≤**8KB** 截断）、finish（不调 turn、`finished/final`、summary=input.summary）。
 - refs: DES/06-agent-module.md §7.1、§7.4；REQ §2.2 工具表、A5-9；QR §1（50/500 字/8KB/200 字行）
 - owned: server/src/modules/agent/tools/query.ts、server/src/modules/agent/tools/finish.ts、server/tests/agent/tools-query.test.ts
@@ -594,7 +594,7 @@
   d) 截断在写路径保证；非正数 limit → INVALID_INPUT（schema 校验）；无 any
   e) VITEST 行 T-06/08/11、A5-9/11、ag-9/10/11（测试侧）登记应勾。偏差注记：ag-9/10/11 的断言落在本任务的 `tools-query.test.ts`（VITEST_PLAN 名义文件为 `budget.test.ts`；按 VITEST_PLAN 头部「文件名允许微调、编号引用不丢」口径执行，登记行不变）
 
-### T-P4-09 工具：send_message + 幂等 key（A5-7/S5 核心）            [status: TODO]
+### T-P4-09 工具：send_message + 幂等 key（A5-7/S5 核心）            [status: DONE]
 - goal: send_message 全流程（幂等命中 → 不发不再审返当前状态；未消耗 → 审计 → GATE1 群状态 → 选账号（online 群成员字典序第一，无 → NO_AVAILABLE_ACCOUNT）→ T13 事务（step tool_dispatched + 幂等 key 行 + message(queued)）→ 等 accepted/sent 至多 **5s** → 各失败码）；SEND_TIMEOUT 后消息保持 unknown 由判定器收敛。
 - refs: DES/06-agent-module.md §8.2 全文、§8.4；DES/10-reliability.md E13；REQ A5-5/7、§2.2 send_message 行；解读 #18
 - owned: server/src/modules/agent/tools/send-message.ts、server/src/modules/agent/idempotency.ts、server/tests/agent/idempotency.test.ts、server/tests/agent/tools-send-message.test.ts
@@ -607,7 +607,7 @@
   d) 二次创建被 `(run_id,key)` PK 阻止；崩溃恢复按 message 现状生成 tool_result 绝不二次创建；无 any
   e) VITEST 行 A5-5/7、T-07、S-05（工具半边）、ag-8（测试侧）登记应勾
 
-### T-P4-10 工具：kick_user（X-1 码表封闭）            [status: TODO]
+### T-P4-10 工具：kick_user（X-1 码表封闭）            [status: DONE]
 - goal: kick_user 门槛顺序（autoKickEnabled → 审计 → GATE1 → 选账号 role∈{creator,admin}）+ 执行（200 / OWNER_LEFT / NO_PERMISSION 透传 / 504 → 等 2s 查成员列表 / 其他网关错 → SEND_FAILED 细节进 message）。
 - refs: DES/06-agent-module.md §8.4、§8.5（X-1 封闭性）；REQ A5-6、A2 OWNER_LEFT 行；QR §3
 - owned: server/src/modules/agent/tools/kick.ts、server/tests/agent/tools-kick.test.ts
@@ -620,7 +620,7 @@
   d) tool_result 的 code 只能取 13 码表（校验器断言封闭性）；无 any
   e) VITEST 行 A5-6、A2-12、G-09、X-1、gw-24/25（测试侧）登记应勾
 
-### T-P4-11 agent run 崩溃恢复（四分支）            [status: TODO]
+### T-P4-11 agent run 崩溃恢复（四分支）            [status: DONE]
 - goal: 恢复扫描 `agent_run WHERE status='running'`：按最后 step.status 分支（done→预算判定续轮 / turn_dispatched→快照重发同轮 / turn_received→续推进 / tool_dispatched→反查外部现状不重发）；同 runId 续传；墙钟按剩余预算重算。
 - refs: DES/06-agent-module.md §9 全文、§12 规约；DES/10-reliability.md 扫描 2；REQ A5-8
 - owned: server/src/modules/agent/recovery.ts、server/src/recovery/scans.ts（agent 段充实，共享串行文件）、server/tests/agent/crash-recovery.test.ts
@@ -633,7 +633,7 @@
   d) 会话历史由 appended_blocks 重建与崩溃前请求一致；无 any
   e) VITEST 行 I10（单测级）、A5-8、ag-18（测试侧）登记应勾
 
-### T-P4-12 cancelled 检查点 + 孤儿租约观测（X-2/O1）            [status: TODO]
+### T-P4-12 cancelled 检查点 + 孤儿租约观测（X-2/O1）            [status: DONE]
 - goal: 取消检查点**只在每步循环开始前**（查 group.status/agent_enabled → cancelled）；unreachable 场景经 GATE1 以 GROUP_UNREACHABLE 错误 tool_result 收尾当前步；调度器每秒观测 `lease_until` 过期的 running run（error 日志 + inconsistency，不接管）。
 - refs: DES/06-agent-module.md §10（X-2 修订）、§9.4（O1 裁剪后）、§2.1；REQ A5-10
 - owned: server/src/modules/agent/cancel.ts、server/src/scheduler/orphan-run-scan.ts（注册行）、server/tests/agent/cancel.test.ts（X-2 回归用例落此文件——VITEST X-2 行原指向 turn-loop.test.ts，按 VITEST_PLAN 头注允许的路径微调，编号引用不变）
@@ -646,7 +646,7 @@
   d) 不存在第二个取消检查点（效果型工具执行前的检查点已删，X-2）；无 any
   e) VITEST 行 X-2、A5-10 登记应勾
 
-### T-P4-13 agent-runs 查询端点            [status: TODO]
+### T-P4-13 agent-runs 查询端点            [status: DONE]
 - goal: `GET /api/agent-runs/:id`（run 字段 + steps[] 逐字段映射）与 `GET /api/groups/:id/agent-runs`（最近 20 条、不含 steps）。
 - refs: DES/06-agent-module.md §11；REQ §2.3 两行；解读 #22
 - owned: server/src/modules/agent/query.ts、server/src/http/routes/agent-runs.ts（+index 注册行）、server/tests/agent/run-query.test.ts
@@ -659,7 +659,7 @@
   d) 时间字段 ISO 8601 UTC、无值 null；无 any
   e) VITEST 行 A-13/14、A5-12 登记应勾
 
-### T-P4-14 mock-gateway kick 开关（gw-24/25）            [status: TODO]
+### T-P4-14 mock-gateway kick 开关（gw-24/25）            [status: DONE]
 - goal: 落地 gw-24 `kick_slow`/`kick_504`（响应 1–5s 可钉值 / 504；504 后成员列表 **2s 内收敛**、「实际是否踢出」独立可配）、gw-25 `owner_left_on_kick`/`kick_no_permission`。
 - refs: DES/14-gateway-service.md §5（#24/25 行）、§3（kick 行）；REQ §2.1 kick 行；QR §1（1–5s、2s 行）
 - owned: mock-gateway/src/switches/kick.ts、mock-gateway/tests/switches-kick.test.ts
@@ -672,7 +672,7 @@
   d) 「是否真踢出」与「响应」解耦可配（后端判定路径的测试根基）；无 any
   e) VITEST 行 gw-24/25（落地侧）登记应勾
 
-### T-P4-15 集成：S5/S6 场景用例 + demo 脚本（串行汇合点）            [status: TODO]
+### T-P4-15 集成：S5/S6 场景用例 + demo 脚本（串行汇合点）            [status: DONE]
 - goal: `tests/scenarios/s5.test.ts`（gw-7 + ag-8）、`tests/scenarios/s6.test.ts`（ag-17 三连）+ 对应 demo 脚本。
 - refs: REQ §2.4 S5/S6 行；DES/12-agent-service.md §7 #8/#17；VITEST_PLAN §2
 - owned: server/tests/scenarios/s5.test.ts、s6.test.ts、scripts/demo/s5.ts、s6.ts
@@ -758,7 +758,7 @@
 
 # P6 · B1 序列 + 页面 5 + B4/页面 4 —— S7/S8（8 任务）
 
-### T-P6-01 序列定义 + 占位符解析与预检            [status: TODO]
+### T-P6-01 序列定义 + 占位符解析与预检            [status: DONE]
 - goal: `POST /api/sequences` 校验（name 非空、steps 非空、index 正整数唯一可不连续、accountRole ∈ {admin,member}、text 非空 ≤2000、delaySeconds ≥0）；占位符扫描 `/\{([A-Za-z0-9_]+)\}/g`（不匹配字符集按字面量，解读 #25）；vars/stepVars 合并推演（""双语义）。
 - refs: DES/07-sequence-module.md §1–§2.3（推演表为测试基准）；REQ §3 B1；解读 #15/#25
 - owned: server/src/modules/sequences/define.ts、server/src/modules/sequences/resolve.ts、server/src/http/routes/sequences.ts（+index 注册行）、server/tests/sequences/precheck.test.ts
@@ -771,7 +771,7 @@
   d) 预检是纯计算无写；定义阶段不做占位符校验；无 any
   e) VITEST 行 A-15、B1-1/4 登记应勾
 
-### T-P6-02 启动互斥 + run/step 快照（S7/S8 事务语义）            [status: TODO]
+### T-P6-02 启动互斥 + run/step 快照（S7/S8 事务语义）            [status: DONE]
 - goal: `POST /api/groups/:id/sequence-runs`：预检 → INSERT run + 全部 step（resolved_vars/var_sources 快照）+ 第 1 步 scheduled_at=now()+delay + ws_event → `201 {runId}`；唯一索引冲突 → `409 SEQUENCE_ALREADY_RUNNING`；预检失败零 INSERT；unreachable/left 群 → `409 GROUP_UNREACHABLE`（解读 #3）。
 - refs: DES/07-sequence-module.md §2.4、§7；DES/02-data-model.md §8.2；REQ §2.3、B1、S7/S8
 - owned: server/src/modules/sequences/start.ts、server/src/http/routes/sequence-runs.ts（+index 注册行）、server/tests/sequences/start-mutex.test.ts
@@ -784,7 +784,7 @@
   d) 预检在任何 INSERT 之前；无 any
   e) VITEST 行 I4（序列半边）、A-16、B1-5/6/7 登记应勾
 
-### T-P6-03 链式排期与步骤推进            [status: TODO]
+### T-P6-03 链式排期与步骤推进            [status: DONE]
 - goal: 调度器扫描到期链头 → 选账号（admin 优先 creator/admin 且 online、member 字典序第一；候选含 rate_limited）→ 创建 message(queued, source='sequence') 或顺延或 skipped；message_sent → step sent + 下一步排期；run 终结判定。
 - refs: DES/07-sequence-module.md §3 全文、§4、§6；REQ B1 排期/选账号行；解读 #19
 - owned: server/src/modules/sequences/scheduler.ts、server/src/scheduler/sequence-scan.ts（注册行）、server/tests/sequences/scheduling.test.ts
@@ -797,7 +797,7 @@
   d) 同一时刻至多链头有排期（后续 scheduled_at=NULL）；step 无独立 cancelled 态（终态取消映射 skipped）；无 any
   e) VITEST 行 B1-2/3/8/9、A-17（行为）登记应勾
 
-### T-P6-04 序列重启恢复（只重排最早过期步骤）            [status: TODO]
+### T-P6-04 序列重启恢复（只重排最早过期步骤）            [status: DONE]
 - goal: 恢复扫描 running 序列 run：链头判定四分支（在途消息等落定 / 未排期等前驱 / 已过期未创建 → 只重排链头 now+delay 且其后全部 scheduled_at=NULL / 未到期保持）。
 - refs: DES/07-sequence-module.md §5；DES/10-reliability.md 扫描 3；REQ B1 重启行
 - owned: server/src/modules/sequences/recovery.ts、server/src/recovery/scans.ts（序列段充实）、server/tests/sequences/restart-reschedule.test.ts
@@ -810,7 +810,7 @@
   d) now()+delay 语义 = 把过期当「重启时刻才到期」重新排队（防重启风暴）；无 any
   e) VITEST 行 I11（单测级）、B1-10 登记应勾
 
-### T-P6-05 sequence-runs 查询端点            [status: TODO]
+### T-P6-05 sequence-runs 查询端点            [status: DONE]
 - goal: `GET /api/sequence-runs/:id` → `{status, currentStepIndex, steps:[{index,status,scheduledAt,sentAt,clientMsgId,resolvedVars,varSources}]}`。
 - refs: DES/07-sequence-module.md §6；REQ §2.3 对应行
 - owned: server/src/modules/sequences/query.ts、server/src/http/routes/sequence-run-query.ts（+index 注册行）、server/tests/sequences/run-query.test.ts
@@ -866,7 +866,7 @@
 
 # P7 · 崩溃测试套件 + I 映射（5 任务）
 
-### T-P7-01 崩溃注入基建 withCrashPoint            [status: TODO]
+### T-P7-01 崩溃注入基建 withCrashPoint            [status: DONE]
 - goal: `tests/helpers/crash.ts`（`withCrashPoint(name, fn)`——事务提交前后/外部调用前后可注入 `process.exit(9)`）+ 子进程 server 装配（随机端口 + 独立测试库 + in-process mock 双服务）+ 崩溃后重启断言 DB/mock counters 的通用断言器。
 - refs: DES/10-reliability.md §5；DES/14-gateway-service.md §7；VITEST_PLAN §0
 - owned: server/tests/helpers/crash.ts、server/tests/helpers/server-process.ts、server/tests/crash/_setup.test.ts
@@ -879,7 +879,7 @@
   d) 崩溃点用环境变量/控制端点触发，不污染生产代码路径（生产代码只保留极薄的 hook）；无 any
   e) VITEST_PLAN §0 登记应勾
 
-### T-P7-02 崩溃点 ①：出站一致性（I1/I2）            [status: TODO]
+### T-P7-02 崩溃点 ①：出站一致性（I1/I2）            [status: DONE]
 - goal: `tests/crash/crash-consistency.test.ts`：queued 未发（first_attempt_at 落库前/后）两窗口 kill -9 → 重启 → 对比网关消息与 DB。
 - refs: DES/10-reliability.md E7、I1/I2 行；DES/05-messaging-module.md §2.3；VITEST_PLAN §4 ①
 - owned: server/tests/crash/crash-consistency.test.ts
@@ -892,7 +892,7 @@
   d) 变异抽查：注释掉 first_attempt_at 守卫 → 测试必须变红；无 any
   e) VITEST 行 I1、I2（crash 半边）、崩溃① 登记应勾
 
-### T-P7-03 崩溃点 ②③：agent run 恢复（I10）            [status: TODO]
+### T-P7-03 崩溃点 ②③：agent run 恢复（I10）            [status: DONE]
 - goal: 扩展 `tests/agent/crash-recovery.test.ts` 为 kill -9 级：turn_dispatched（HTTP 前后）、tool_dispatched（send/kick 效果未知）四窗口。
 - refs: DES/06-agent-module.md §9；DES/10-reliability.md I10；VITEST_PLAN §4 ②③
 - owned: server/tests/agent/crash-recovery.test.ts（扩展，共享串行文件）
@@ -905,7 +905,7 @@
   d) 变异抽查：去掉「不重发」守卫 → 必须变红；无 any
   e) VITEST 行 I10（crash 半边）、崩溃②③ 登记应勾
 
-### T-P7-04 崩溃点 ④：序列排期中（I11）            [status: TODO]
+### T-P7-04 崩溃点 ④：序列排期中（I11）            [status: DONE]
 - goal: 扩展 `tests/sequences/restart-reschedule.test.ts` 为 kill -9 级：链头已排期/在途窗口崩溃 → 重启只重排最早过期步骤。
 - refs: DES/07-sequence-module.md §5；DES/10-reliability.md I11；VITEST_PLAN §4 ④
 - owned: server/tests/sequences/restart-reschedule.test.ts（扩展，共享串行文件）
@@ -918,7 +918,7 @@
   d) 变异抽查：去掉「其后置 NULL」→ 必须变红；无 any
   e) VITEST 行 I11（crash 半边）、崩溃④ 登记应勾
 
-### T-P7-05 I1–I14 映射核对与 VITEST_PLAN 收口            [status: TODO]
+### T-P7-05 I1–I14 映射核对与 VITEST_PLAN 收口            [status: DONE]
 - goal: 逐条核对 I1–I14 均有具名测试且测试名引用不变量编号；VITEST_PLAN 全条目（I/S/gw/ag/崩溃/回归含 R-B 行）勾选或完成度表裁剪记录；补漏（缺哪条补哪条的归属任务或直接补测试）。
 - refs: VITEST_PLAN 全文；DES/10-reliability.md §4；DES/11-verification.md 统计行
 - owned: server/VITEST_PLAN.md（勾选）、docs/plan/JOURNAL.md（核对记录）、（如需补漏）server/tests/** 新增文件
@@ -935,7 +935,7 @@
 
 # P8 · C2 + C1 + C3 + 交付面（5 任务）
 
-### T-P8-01 C1：媒体文件落盘与清理            [status: TODO]
+### T-P8-01 C1：媒体文件落盘与清理            [status: DONE]
 - goal: 调度器扫描 `media_url IS NOT NULL AND local_file_path IS NULL` → GET mediaUrl → 写 `media/<msgId>` → 事务回填 localFilePath（404 → inconsistency media_expired）；每日清理超 `MEDIA_RETENTION_DAYS`（默认 **30 天**）且不被 running run 引用（按群保守粒度）的文件，删文件与置空同事务。联调依赖 T-P3-09 已落地的 gw-27 `media_message`/`media_expire_404` 开关。
 - refs: DES/05-messaging-module.md §7；DES/02-data-model.md §5.1；REQ C1；解读 #6；QR §1（30 天行）
 - owned: server/src/modules/messages/media.ts、server/src/scheduler/media-scan.ts（注册行）、server/tests/messages/media.test.ts
@@ -948,7 +948,7 @@
   d) `media/` 不进 git（.gitignore 已含）；无 any
   e) VITEST 行 C1、gw-27（测试侧）登记应勾
 
-### T-P8-02 C2：anthropic provider            [status: TODO]
+### T-P8-02 C2：anthropic provider            [status: DONE]
 - goal: `providers/anthropic.ts`：@anthropic-ai/sdk 透传 + 进出形状映射（多块取首个有效块强制恰一块、stop_reason 映射、其余映射 end_turn+text 兜底）；audit judge prompt（只输出 `{verdict,reason}` JSON，解析失败 → 500）；`.env.example` 与双实例部署说明。
 - refs: DES/12-agent-service.md §4–§6；REQ C2；DES/01-architecture.md §6.5
 - owned: mock-agent/src/providers/anthropic.ts、mock-agent/.env.example（更新）、mock-agent/tests/anthropic-shape.test.ts（无 key 时形状映射纯函数测试）
@@ -987,7 +987,7 @@
   d) 不虚报完成度（诚实三栏表是评分面）；不提交 media 产物/密钥
   e) 本任务是文档联动本体；VITEST 未勾项在完成度表有裁剪记录
 
-### T-P8-05 DoD 终验清单执行            [status: TODO]
+### T-P8-05 DoD 终验清单执行            [status: DONE]
 - goal: 按 DRIVER-PROMPT §9 逐项勾选终验：全仓四命令绿、抽查复审 5 个已 DONE 任务重跑验证命令 + 重读代码、git 历史检查、HANDOFF 终态。
 - refs: DRIVER-PROMPT §9 全文
 - owned: docs/plan/HANDOFF.md（终态）、docs/plan/JOURNAL.md（终验记录）
