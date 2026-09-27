@@ -138,13 +138,15 @@ async function skipStep(client: PoolClient, step: DueStep): Promise<void> {
  * 返回推进的步数（created/skipped/deferred 合计；观测用）。
  */
 export async function runSequenceScheduler(deps: SequenceSchedulerDeps): Promise<number> {
+  // client_msg_id 非空 = 消息已创建在途（崩溃于调度写回前后）→ 交恢复 WAIT 等落定，不得重建（T-P7-04）
   const { rows: due } = await deps.pool.query<DueStep>(
     `SELECT s.id, s.run_id, s."index", s.account_role, s.text_template, s.delay_seconds,
             s.resolved_vars, r.group_id
      FROM sequence_run_step s
      JOIN sequence_run r ON r.id = s.run_id AND r.status='running'
      JOIN "group" g ON g.id = r.group_id AND g.status='active'
-     WHERE s.status='pending' AND s.scheduled_at IS NOT NULL AND s.scheduled_at <= now()
+     WHERE s.status='pending' AND s.client_msg_id IS NULL
+       AND s.scheduled_at IS NOT NULL AND s.scheduled_at <= now()
      ORDER BY s.run_id, s."index"`,
   );
   let advanced = 0;
