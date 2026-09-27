@@ -39,6 +39,7 @@ import {
 import { startAgentRun } from './trigger.js';
 import { execGetRecentMessages } from './tools/query.js';
 import { execFinish } from './tools/finish.js';
+import { execSendMessage, sendMessagePreAudit, type DeliveryWaiter } from './tools/send-message.js';
 
 
 
@@ -71,6 +72,8 @@ export type ToolOutcome =
 
 export interface ToolCallContext {
   readonly client: PoolClient;
+  /** 出站等待用的连接池（事务 client 不能跑长轮询——send_message 的 5s 窗口用） */
+  readonly pool: Pool;
   readonly runId: string;
   readonly groupId: string;
   readonly stepSeq: number;
@@ -88,6 +91,8 @@ export interface AgentExecutorDeps {
   readonly instanceId: string;
   readonly maxConcurrentRuns?: number;
   readonly executeTool?: ToolExecutor;
+  /** send_message 的 5s 落定等待器注入缝（测试可替；默认轮询 message 表） */
+  readonly deliveryWaiter?: DeliveryWaiter;
 }
 
 interface RunRow {
@@ -384,6 +389,24 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         ),
       );
 
+      // send_message 的幂等预检在审计前（§8.2 KEY 分支逐字：命中即短路、不再审计）
+      if (tool.name === 'send_message') {
+        const hitOutcome = await tx(deps.pool, (c) =>
+          sendMessagePreAudit(
+            { client: c, runId, groupId: run.group_id, input: tool.input },
+            { pool: deps.pool, waiter: deps.deliveryWaiter },
+          ),
+        );
+        if (hitOutcome !== undefined) {
+          await appendToolResult(runId, seq, tool.id, assistantBlock, {
+            content: hitOutcome.type === 'result' ? hitOutcome.content : JSON.stringify({ code: 'SEND_TIMEOUT', message: 'unreachable' }),
+            isError: hitOutcome.type === 'result' ? (hitOutcome.isError ?? false) : true,
+            resultSummary: hitOutcome.type === 'result' ? hitOutcome.resultSummary : undefined,
+          });
+          continue;
+        }
+      }
+
       // 效果型工具先过审计门禁（§8.1：send_message/kick_user 执行前必经 /agent/audit）；
       // 审计 pass 后才落 tool_dispatched 意图（§3 第 3 条次序：意图落库在执行前、审计后）
       if (isEffectTool(tool.name)) {
@@ -459,9 +482,9 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         return;
       }
 
-      const toolExec = deps.executeTool ?? defaultToolExecutor;
+      const toolExec = deps.executeTool ?? defaultToolExecutor(deps);
       const outcome = await tx(deps.pool, (c) =>
-        toolExec({ client: c, runId, groupId: run.group_id, stepSeq: seq, toolName: tool.name, input: tool.input }),
+        toolExec({ client: c, pool: deps.pool, runId, groupId: run.group_id, stepSeq: seq, toolName: tool.name, input: tool.input }),
       );
 
       if (outcome.type === 'end_run') {
@@ -533,9 +556,12 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
 const MAX_RESULT_SUMMARY_CHARS = 200; // resultSummary ≤200 字（REQ §2.3 行）
 
 /** 缺省工具分发：get_recent_messages 实装（T-P4-08）；send_message/kick_user 归 T-P4-09/10 */
-const defaultToolExecutor: ToolExecutor = async (ctx) => {
+const defaultToolExecutor = (execDeps: AgentExecutorDeps): ToolExecutor => async (ctx) => {
   if (ctx.toolName === 'get_recent_messages') {
     return execGetRecentMessages(ctx.client, { groupId: ctx.groupId, input: ctx.input });
+  }
+  if (ctx.toolName === 'send_message') {
+    return execSendMessage(ctx, { pool: execDeps.pool, waiter: execDeps.deliveryWaiter });
   }
   return {
     type: 'result',
