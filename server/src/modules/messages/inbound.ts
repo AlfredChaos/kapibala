@@ -71,6 +71,16 @@ export async function projectInboundMessage(
       [group.id, msg.msgId],
     );
     if ((exists.rowCount ?? 0) > 0) {
+      // 幂等合并且补齐 media_url：出站行 INSERT 时本无 mediaUrl（§4.3 只回填确认字段），
+      // 回流事件是唯一载体——不补则 own 媒体消息永远丢 media_url，C1 下载无从发生。
+      // 条件更新 media_url IS NULL：重复回流/双推吸收（幂等，已带值不覆写）
+      if (msg.mediaUrl !== undefined && msg.mediaUrl !== null) {
+        await client.query(
+          `UPDATE message SET media_url=$3, updated_at=now()
+            WHERE group_id=$1 AND msg_id=$2 AND media_url IS NULL`,
+          [group.id, msg.msgId, msg.mediaUrl],
+        );
+      }
       return 'merged'; // message_sent 先到已回填 → 幂等跳过（§4.1 表第 4 行）
     }
     // 乱序窗口内回流先到：插占位行，client_msg_id=NULL 等 finalizeSent 补关联（§4.3）

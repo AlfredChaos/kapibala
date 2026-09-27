@@ -191,6 +191,15 @@
 - 踩坑：① boot() **不做** seed——seed 是独立 CLI 职责；env 缺 seed → 401（先红来源）。② content-type=json + 空 body 被 Fastify 400——connect POST 必须带 `{}`。③ job 响应契约只有 {status,errors}，group_id 需库读。④ mock rate_limit 开关武装=永拒（窗口仅在 clear 后由 rateLimitedUntil 承继）——编排顺序必须是 注册→clear→观察。⑤ hashline 工具在本卡密集同形段（多 `.filter(`/`await timeline`）多次误锚；编辑顺序断言时曾吞掉 m2 send 行——每次边界警告都必须回读验证。
 - VITEST 登记：S1、S2、S3、S4、gw-1/2/3/6（场景侧）应勾——按 SP-6 规则登记于此。阶段门 P3：demo:s1–s4 现场 PASS（checks=10/6/7/28）。
 
+---
+
+## 2026-09-28 T-P8-01 C1：媒体文件落盘与清理
+- 做了什么：`modules/messages/media.ts`（`createMediaDownloadScan`：扫 `media_url NOT NULL AND local_file_path IS NULL AND 未盖过期戳` 行 → `gateway.downloadMedia` → `media/<msgId>` 写盘 → tx 条件 UPDATE 回填；404→`inconsistency{kind:'media_expired'}` 经 `INSERT…WHERE NOT EXISTS` 单次盖戳且该行退出谓词；网络/5xx→指数退避 500ms×2 封顶 30s（内存 Map 只约束节奏）+ `createMediaCleanupScan`：`created_at < now()-retention` 且群无 running run → **先 tx 置空指针 COMMIT 后 unlink**（不留指向已删文件的记录；ENOENT 幂等）；内部 24h 节流对契约「每日」粒度）+ `scheduler/media-scan.ts`（两注册行：`media-download` 随 tick、`media-cleanup` 内部节流）+ index.ts 接线（retentionDays ← `config.mediaRetentionDays`，默认 30）。**跨文件修正**：`inbound.ts` own-merge 分支补 `media_url` 条件回填（出站行 INSERT 时本无 mediaUrl，回流是唯一载体；不补则 own 媒体消息永不可下载——C1 必需，幂等 `WHERE media_url IS NULL`）。
+- 验证命令与输出摘录：**先红后绿**——模块不存在时 4 个直调例红（addGroup 缺 account FK → insert 前先落 acc-01 行）；实现后 `npx vitest run tests/messages/media.test.ts` → **6/6**（E2E×2 走真管线 1s-tick 自下载/盖戳 + 直调×4 钉退避/幂等/清理/隔离）。断言点：字节内容含 `data-media-id="<msgId>"`（mock 确定性 SVG）；404 用例跨 ≥2 tick 后 inconsistency 仍恰 1 条；退避例 calls=1→1→2 锁死节奏；清理例返回 removed=1（B 群 running run 保护 + C 未到期不动，第二轮 0）。全量 340/341 绿——唯一红仍是已知 create-group-job flake。
+- 偏差与【解读】：① 清理顺序定为「置空先、删文件后」——同事务语义的防崩溃正确序：DB 先一致、文件后删；倒序会在崩溃窗留悬空指针（C1 逐字「不留指向已删文件的记录」以此为兑现方式），代价最坏是孤儿文件（无害、不可见）。② 过期盖戳真值放 ws_event 行（NOT EXISTS 双保险），非内存——重启后也不重推。③ `local_file_path` 存绝对路径（`path.resolve(mediaDir, safeMsgId)`）——清理零依赖目录约定。④ msgId→文件名做路径穿越消毒（`[\\/]`→`_`）——契约形状 m-N 不受影响。⑤ mediaDir 默认 `path.resolve('media')`（包根 cwd）；`.gitignore` 的 `media/` 已覆盖（验证：E2E 写盘后 `git status` 干净）。
+- 踩坑：① **`media/` 会真实落 server 包目录**（cwd=server）——E2E 后需清或靠 .gitignore；mock 的 `attachMedia` 只在落地时刻判定，arm `media_message` 必须在 send 之前。② own-回流 merge 分支会吞 media_url（T-P2-08 遗留缺口）——C1 对此类消息曾经完全不可达；同一 bug 也在外部消息 dup/补投路径下没事（INSERT 本就带 media_url）。③ 直插 `message` 行的测试要先插 account（FK `group.creator_account_id`）。
+- VITEST 登记：C1、gw-27（测试侧）应勾——按 SP-6 规则登记于此。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
