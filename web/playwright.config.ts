@@ -1,15 +1,14 @@
 // Playwright C3 冒烟配置（T-P8-03；REQ C3 逐字「一条 Playwright 测试」+ DES/15 §6 获准例外）。
-// webServer 数组拉起全栈：① scripts/e2e/backend.ts（真 PG 模板库 + mock-gateway +
-// mock-agent + boot() 固定 :3000——vite.config.ts 代理逐字目标；装配数据后打 E2E_READY）
-// ② vite dev :5173（/api、/ws 同源代理到 :3000，零 CORS/WS origin 适配）。
+// webServer 数组拉起全栈：① server/tests/e2e/backend.ts（tsx 直跑：真 PG 模板库 +
+// mock-gateway + mock-agent + boot() 固定 :3000——vite.config.ts 代理逐字目标；
+// 数据装配完写 tests/e2e/.e2e-state.json stage=ready）② vite dev :5173 --host 127.0.0.1。
+// 注意：本文件在每个 worker 进程里会再求值一次——任何顶层副作用（删 state 文件等）
+// 会在测试跑一半时误删本轮文件；状态文件生命周期由 backend 自理（启动即删旧、ready 最后写）。
 import { defineConfig, devices } from '@playwright/test';
-// 注意：本文件也会在 worker 进程里再求值一次——状态文件清理不能放顶层
-//（worker 启动晚于 backend 写盘，顶层 rmSync 会在测试跑一半时把 state 删了）。
-// 清理挪到 globalSetup：主进程一次、在 webServer 拉起之后/测试执行之前。
 
 export default defineConfig({
   testDir: './tests/e2e',
-  timeout: 240_000, // 全栈装配在并行测试负载下可拖到分钟级（契约只要求可重复，不计时） // 全栈装配（建群+run 终态）可能耗数十秒——一次给足
+  timeout: 240_000, // 全栈装配（建群+agent run 首步）在并行测试负载下可拖到分钟级——契约只要求可重复，不计时
   retries: 0,
   workers: 1, // 单条用例 + 固定端口，无并行意义
   use: {

@@ -7,3 +7,5 @@
 - `pnpm -F server db:seed`：幂等预置 admin/viewer + acc-01..04（T-P0-06 落地）。
 - 配置变量与默认值以 `docs/design/01-architecture.md` §6.1 为准（`.env.example` 同源）；缺失必填项拒绝启动。
 - 端口 `:3000`（`PORT`）。
+- 崩溃一致性套件：`pnpm -F server exec vitest run tests/crash/`（+ `tests/agent/crash-recovery.test.ts`、`tests/sequences/restart-reschedule.test.ts`）；崩溃点经 `CRASH_POINTS`/`/_test/crash`（需 `CRASH_CONTROL=1`）装配，命中 exit 9。
+- E2E 后端装配入口：`tests/e2e/backend.ts`（由 web `playwright.config.ts` 的 webServer 拉起，固定 :3000）。

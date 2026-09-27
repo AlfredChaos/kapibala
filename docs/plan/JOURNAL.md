@@ -282,6 +282,46 @@
 - 踩坑（两连挂真凶）：**playwright.config.ts 顶层代码在每个 worker 进程里会再求值一次**——把「删上轮 state 文件」放顶层，worker 启动时（晚于 backend ready 写盘）把本轮 state 删掉 → 测试侧 readState 等不到文件、耗尽 240s。修：删文件挪 globalSetup（主进程一次、恰在 webServer 拉起后）。次级坑：① pnpm exec webServer command 的孙进程（tsx）teardown 杀不到 → :3000 残留端口冲突 → 改直调 node_modules/.bin；② vite dev 默认绑 localhost（可能解析 ::1）而 Playwright 探 127.0.0.1 → --host 127.0.0.1 钉死；③ 全栈装配上 90s testTimeout 在兄弟并行测试负载下不够 → 240s（契约只要求可重复，不计时）。
 - VITEST 登记：C3 ❌→✅ 应勾（00-SPEC.md 矩阵行已登记 C3=T-P8-03）；DES/11 统计：E2E 层从 0 → 1 条（Playwright smoke）。
 
+## 2026-09-28 T-P4-01 mock-agent 骨架 + scripted provider（补登，评审要求）
+- 做了什么：`mock-agent/src/app.ts`（Fastify 骨架：/_test/emit 触发 + /_test/scenario + /_test/counters + /_test/responses SSE 通道）+ `src/providers/scripted.ts`（剧本驱动 provider：rule 匹配 → response 模板渲染 → SSE 推 agent_response）+ `src/scenario.ts`（开关装配）+ `tests/scripted.test.ts`（345 行）。
+- 验证命令与输出摘录：`pnpm -F mock-agent test` → 3/3 文件绿（scripted 用例全过）。
+- 先红后绿：新测试文件先写后跑——provider 骨架同步落地（前序 mock-gateway 同构模式复用）。
+- VITEST 登记：骨架层——场景回归行由 T-P4-02/03 开关用例覆盖，无独立新行。
+- 补登说明：原 worker 未写 JOURNAL；本条由 T-P7-05 核对补齐（commit 235c3e0）。
+
+## 2026-09-28 T-P4-02 mock-agent 协议开关 ag-1..7/17/19（补登）
+- 做了什么：`src/switches/protocol.ts`（122 行：ag-1..7/17/19 判定）+ `scenario.ts` 开关装配 + `tests/helpers/agent.ts`（111 行助手）+ `tests/switches-protocol.test.ts`（208 行）；scripted.test.ts 瘦身复用助手。
+- 验证命令与输出摘录：`pnpm -F mock-agent test` → 全绿（switches-protocol.test.ts 全过）。
+- VITEST 登记：ag-1..7/17/19 覆盖行勾选于「开关代表用例」维度（VITEST_PLAN §6 ag 检查点）。
+- 补登说明：commit 46075e2，由 T-P7-05 补齐。
+
+## 2026-09-28 T-P4-03 mock-agent 行为开关 ag-8..16/18（补登）
+- 做了什么：`src/switches/behavior.ts`（166 行：ag-8..16/18）+ `app.ts`/`scripted.ts`/`protocol.ts` 接线 + `tests/switches-behavior.test.ts`（196 行）。
+- 验证命令与输出摘录：`pnpm -F mock-agent test` → 全绿。
+- VITEST 登记：ag-8..16/18 代表用例就位 → VITEST_PLAN §6 ag-1-19 覆盖集齐。
+- 补登说明：commit 8a6e108，由 T-P7-05 补齐。
+
+## 2026-09-28 T-P4-14 mock-gateway kick 开关 gw-24/25（补登）
+- 做了什么：`src/switches/kick.ts`（56 行：gw-24 `kick_504_member_stays` / gw-25 `kick_owner_left` 判定）+ `messaging.ts` kick 路由接线（504 后成员保留/移除两分支）+ `tests/switches-kick.test.ts`（83 行：先红后绿）。
+- 验证命令与输出摘录：`pnpm -F mock-gateway test` → 全绿。
+- VITEST 登记：gw-24/gw-25 代表用例 → gw-1-28 覆盖集齐；服务端半边在 `tests/agent/tools-kick.test.ts`（X-1 码表封闭 + 2s 成员列表收敛断言）。
+- 补登说明：commit 9c835d3，由 T-P7-05 补齐。
+
+## 2026-09-28 T-P3-10 mock-gateway 群组生命周期开关 gw-18/20/21/22/23/26（补登）
+- 做了什么：`src/switches/group-lifecycle.ts`（81 行：gw-18 `member_joined_never` / gw-20 `invite_not_ready` / gw-21 `invite_expired` / gw-22 `already_member` / gw-23 `promote_not_member_yet` 计数注入 / gw-26 `leave_500`）+ `groups.ts` 接线（join/promote/invite 路径）+ `messaging.ts` leave 接线 + `state.ts` SwitchConfig.runtime（gw-23 按作用域剩余注入次数，随 scenario 覆盖清零）+ `tests/switches-group.test.ts`（282 行）。
+- 契约点：gw-20 钉值优先、缺省按契约「0 或几秒」随机；gw-22 强制 409 ALREADY_MEMBER **且不推事件**（QR §2「视为成功，直接 promote」语义——自然路径不存在时由开关制造该成员态）；gw-23 `params.times` 钉 N、缺省 1 次后放行（QR §2 promote ≤2 调用现实档）；gw-26 500 时成员保留不推 member_left。
+- 验证命令与输出摘录：`pnpm -F mock-gateway test` → 全绿；typecheck+lint 零错。
+- VITEST 登记：gw-18/20/21/22/23/26 代表用例 → gw 开关覆盖推进；服务端 ALREADY_MEMBER 端到端在 `tests/groups/create-group-job-branches.test.ts`（D2-2）。
+- 补登说明：commit 7d5719b；前一 worker 中途被杀，本项实际由 impl-a3 在上一轮完成落库，由 T-P7-05 核对补齐 JOURNAL。
+
+
+## 2026-09-28 T-P8-04 README + 完成度表 + AGENTS.md 终同步
+- 做了什么：根 `README.md`（中文、命令原样：快速开始五行序列 / 架构一段图 / S1–S8 命令+预期 PASS 表 / 「如何验证重启不变量」一条命令跑 crash 套件 / C3 e2e / C2 切换（AGENT_MODE=anthropic+AGENT_URL）/ 契约解释声明 26 条链接 / 完成度三栏表）+ 根 AGENTS.md §1 补 `demo:s*`/`e2e` 行 + scripts/README 由「脚本未创建」措辞改指真实入口 + server/AGENTS.md（crash 套件命令 + e2e backend 入口）+ web/AGENTS.md（e2e 形态）。package.json 无改动（demo/e2e 脚本早已 SP-5 预注册）。
+- 验证命令与输出摘录（终验逐条实跑）：`pnpm install` → `Already up to date`；`docker compose up -d`（容器已在跑 8h healthy）；`db:migrate` → `applied migration v9: 009-group-creating.sql`；`db:seed` → `inserted 0/0`（幂等）；`pnpm dev` 四服务并行实测 200/200/404(route-不存在但进程活)/200；`pnpm demo:s1..s8` 全 PASS（s1 checks=10/s2=6/s3=7/s4=28/s5=6/s6=5/s7=5/s8=10，输出进本条）；`pnpm -F server exec vitest run tests/crash/` → 7/7 绿；`pnpm e2e` 修竞态后连续 3 次绿（7.9s/3.7s/8.5s）。
+- 偏差与【解读】：① 「干净环境」在无网/不 reset docker 卷约束下落地为「幂等命令逐条实跑 + 输出记录」——`docker compose up -d`/`pnpm install` 幂等输出即为复现证据；② 完成度表 VITEST 簿记行记「🟡 部分」：全部用例存在且绿，☐→☑ 勾选是 T-P7-05 在飞簿记，不为装表伪造勾选；③ C2 记「完成·需自配 key」——通道/映射已实装且遵守「后端只改 AGENT_URL」，本机无真 key 未跑真实 LLM（诚实栏位）。
+- 踩坑（本卡衍生，T-P8-03 修补）：e2e state 文件竞态的第三种错法——把删除挪 globalSetup 仍输（globalSetup 跑在全部 webServer ready 后；vite probe 慢的轮次里 backend 已写完 ready 又被删 → 测试饿死）。nonce 方案也因 webServer spawn env 链路未透传而放弃。落地形态：**backend 进程启动第一行 rm state + 装配完才写 ready**（存在⇒本轮所写；backend 没起来则文件不存在→测试显性失败）。fix commit e2c288f。
+- VITEST 登记：本卡纯文档+脚本验证，无新用例；完成度表已如实反映矩阵簿记在飞。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

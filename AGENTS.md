@@ -21,10 +21,12 @@ pnpm lint && pnpm typecheck # 全仓 lint + 类型检查
 pnpm build                  # 全仓构建
 pnpm -F server db:migrate   # 执行迁移（dev 启动时自动跑；此命令用于显式排查）
 pnpm -F server db:seed      # 预置服务账号与 admin / viewer 用户（幂等）
+pnpm demo:s1 … demo:s8      # 场景演示（独立隔离环境，可与之并行；见 scripts/README.md）
+pnpm e2e                    # C3 单条 Playwright 冒烟（占 :3000/:5173——先停 pnpm dev）
 ```
 
 > 脚手架落地后**必须逐条运行验证**；命令、脚本名、端口变化时同步更新本文件。
-> 脚手架阶段（T-P0-01）补充：`db:migrate` / `db:seed` 的实现分别在 T-P0-04 / T-P0-06 落地（脚本名已预注册）；`pnpm demo:s1..s8` / `pnpm e2e` 的预注册说明见 `scripts/README.md`。
+> 脚本预注册（SP-5）：`demo:s1..s8` / `e2e` 在 T-P0-01 一次性注册进根 package.json；脚本文件与编排细节见 `scripts/README.md`。使用入口与预期输出见根 README.md「演示（S1–S8）」。
 
 默认端口：server `:3000` · web `:5173` · mock-gateway `:4100` · mock-agent `:4200`（scripted；anthropic 实例 `:4300`，C2 按需）· postgres `:5432`（各包 `.env.example` 为准）。
 

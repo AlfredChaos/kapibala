@@ -974,7 +974,7 @@
   d) 仅此一条 E2E，不扩面（全局 UI 测试策略）；无 any
   e) 矩阵 C3（❌→✅）登记应勾；DES/11 统计更新说明进 JOURNAL（矩阵本身不改，README 完成度表呈现）
 
-### T-P8-04 README + 完成度表 + 演示终验 + AGENTS.md 终同步            [status: TODO]
+### T-P8-04 README + 完成度表 + 演示终验 + AGENTS.md 终同步            [status: DONE]
 - goal: README（中文为主、命令原样）：快速开始、架构一段图、S1–S8 演示方法与预期、「如何验证重启不变量」章（一条命令跑崩溃套件）、完成度三栏表（完成/部分/未做）、契约解释声明链接、C2 切换说明；根/包内 AGENTS.md 与实际命令逐条终同步；`pnpm demo:s1..s8` 全部实跑终验。
 - refs: DRIVER-PROMPT §9 交付面；DES/14 §8；REQ §5；AGENTS.md §1 自要求
 - owned: /README.md、/AGENTS.md（根，终同步）、server/AGENTS.md、web/AGENTS.md、mock-gateway/AGENTS.md、mock-agent/AGENTS.md、/package.json（如需脚本微调，串行所有权）

@@ -5,3 +5,4 @@
 - dev 端口 `:5173`；`/api`、`/ws` 由 vite 代理到 server `:3000`（`vite.config.ts`），前端代码一律同源相对路径。
 - 只写单元（纯函数）与组件/集成层测试（根 §4）；Playwright 仅 C3 授权场景（T-P8-03）。
 - 页面/路由/数据层设计见 `docs/design/15-web-console.md`；API 形状以 `@kapibala/contract` 与 `docs/analysis/04-api-spec.md` 为准。
+- `pnpm e2e`（根脚本）→ `playwright.config.ts`：webServer 数组拉起全栈（server/tests/e2e/backend.ts + vite dev）；仅占 :3000/:5173 的测试进程，先停 `pnpm dev`。
