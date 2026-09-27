@@ -35,6 +35,12 @@
 - 偏差与【解读】：无。
 - 踩坑：无。
 
+## 2026-09-27 T-P0-01 workspace 脚手架与工程基建
+- 做了什么：落地 pnpm workspace 骨架与工程基建（T-P0-01 验收项全量）：根 package.json / tsconfig.base.json / eslint.config.js / pnpm-workspace.yaml（预收录 `packages/*`）、四包骨架（package.json / tsconfig / vitest.config / .env.example / 包内 AGENTS.md 存根）、docker-compose（postgres:16）、根脚本一次性预注册（dev/build/test/lint/typecheck + demo:s1..s8 / e2e / db:migrate / db:seed）、`packages/contract` 占位骨架（F1）。commit `e3d1b5d`（39 files +2791）。
+- 验证命令与输出摘录：`pnpm install --frozen-lockfile` → clean；`docker compose up -d` → postgres:16 healthy（pg_isready 通过）；`pnpm lint && pnpm typecheck && pnpm build && pnpm test` → 全绿；`pnpm dev` 冒烟 → vite :5173 回 200、fastify :3000 listening、`/api` 经 vite 代理到 :3000 验证通过。
+- 偏差与【解读】：(a) 卡 owned 之外新增 7 个可启动 dev 的占位文件（`server/src/index.ts`、`web/index.html` + `vite.config.ts` + `src/*`、mock 存根）——编排者 brief 明确授权；(b) Docker Hub 不可达 → 经 docker.m.daocloud.io 镜像拉取 postgres:16 后本地 retag，compose 文件未动——全新机器需可访问 Docker Hub；(c) `pnpm-lock.yaml` 一并提交（卡 owned 未列）——随 manifest 所有者提交（既定规则）；(d) 审查 info 级发现两项随本轮收口提交：`@types/node` 钉到 `^22`（对齐 engines floor）、各包 tsconfig `include` 扩宽为 `["src", "tests", "vitest.config.ts"]`（`rootDir` 相应改包根——include 越出 src 后 `tsc` 与 `tsc --noEmit` 均报 TS6059；dist 布局变 `dist/src/**`，dev 走 tsx 不受影响）。
+- 踩坑：`docker compose up` 拉镜像超时失败的根因是本机网络到 registry-1.docker.io（Docker Hub）不可达，而非 compose 配置问题——绕法：`docker pull docker.m.daocloud.io/library/postgres:16` 后 `docker tag` 为 `postgres:16`。
+
 ---
 
 <!-- 后续任务条目按上述格式在此追加。示例：

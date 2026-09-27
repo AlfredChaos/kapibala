@@ -10,18 +10,20 @@
 ## 已完成
 
 - [x] 设计收口：D1-1/D1-2/D1-3、X-1/X-2、D2-*、D3-*、O1–O4 裁剪已回写设计文档（review §4 清单 1–12）。
-- [x] 审查残留 R-A/R-B/R-C…R-G 已由文档 worker 回写（**验证待收口**，见 JOURNAL 对应条目）。
-- [x] 环境自检 + git init + 首提交（**验证待收口**，见 JOURNAL）。
+- [x] 审查残留 R-A/R-B/R-C…R-G 已由文档 worker 回写（phase0 完成并收口，commit f7a05a8）。
+- [x] 环境自检 + git init + 首提交（phase0 完成，见 JOURNAL）。
 - [x] 规划三件套：`00-SPEC.md`（规范书 + 验收总表 + 裁剪预案）、`01-PLAN.md`（P0–P8+缓冲）、`02-TASKS.md`（73 个原子任务 DAG）；`JOURNAL.md` / `HANDOFF.md` 骨架就位。
-- [x] 计划评审门：2 个独立上下文审查子代理评审 SPEC/PLAN/TASKS → **均 PASS（无 blocker）**；合并修复清单 F1–F11（含 contract 占位骨架实现细节）已全部回写 02-TASKS / 00-SPEC / 01-PLAN / 本文件，卡字段完整性脚本复查通过。待编排者 commit `docs(plan): spec, plan, and task DAG` 后进入执行。
+- [x] 计划评审门：2 个独立上下文审查子代理评审 SPEC/PLAN/TASKS → **均 PASS（无 blocker）**；合并修复清单 F1–F11（含 contract 占位骨架实现细节）已全部回写 02-TASKS / 00-SPEC / 01-PLAN / 本文件，卡字段完整性脚本复查通过。计划三件套已 commit（514c287）。
+- [x] **T-P0-01 workspace 脚手架与工程基建 DONE**（e3d1b5d，39 files +2791；lint/typecheck/build/test 全绿 + `pnpm dev` 冒烟通过，见 JOURNAL）。reviewer info 级跟进（@types/node 钉 `^22`、各包 tsconfig include 覆盖 tests/）已随收口提交落地。
 
 ## 进行中
 
-- 无（等待编排者 commit 计划三件套 → 派发 T-P0-01；lane-B/lane-C 首任务在 T-P0-01/T-P0-02 完成后按 DAG 并行拉起）。
+- T-P0-02 共享契约类型包 packages/contract — impl-a 执行中。
+- T-P0-03 全量数据库迁移 001–008 — impl-b 执行中（迁移 commit 851c11f 已落，收尾/评审中）。
 
 ## 剩余（按 DAG 顺序，详见 02-TASKS.md）
 
-- P0（7 任务）：脚手架 → packages/contract → 全量迁移 → db 基建/health → 常量 I14 → seed → auth(B3)。
+- P0 余下（T-P0-04..07）：db 基建/health → 常量 I14 → seed → auth(B3)；随后 P1–P8 按 DAG 顺序执行。
 - P1（5）：mock-gateway 核心 + gw-1/2/3。
 - P2（12）：SSE/死信/账号状态机/入站/成员投影/WS/时间线 + gw-4/5/19/28。
 - P3（11）：出站全链/建群/leave-all + S1–S4 集成（接口面冻结点）。
@@ -40,12 +42,13 @@
 | lane-C（mock-agent）正式排在 P4 但 DAG 只依赖 T-P0-02 | 已利用 | lane-A 阻塞时提前拉起 T-P4-01..03（不违反阶段依赖：它们不消费 server） |
 | 共享文件竞态（index.ts/dispatch.ts/registry.ts/routes/index.ts/VITEST_PLAN/根 package.json） | 已消解 | §0 规则 1/2/3/7：依赖边串行化 + 阶段门统一勾选 + 脚本预注册 |
 | AGENTS.md 命令漂移 | 已消解 | T-P0-01 初核对、T-P8-04 终同步，域任务只核对不改 |
+| Docker Hub 不可达（本机网络） | 已缓解 | postgres:16 经 docker.m.daocloud.io 拉取后本地 retag（compose 未动）；全新机器需可访问 Docker Hub 或预配镜像 |
 
 ## 验证状态快照（最近一次）
 
-- 全仓 lint / typecheck / test / build：**未执行**（零代码，属正常）。
+- 全仓 lint / typecheck / test / build：**绿**（T-P0-01 `e3d1b5d` 时点全绿；收口提交复验 `pnpm typecheck` 0 错、`pnpm build` 全 Done）。
 - 阶段门：P0–P8 全部未达。
 - VITEST_PLAN 勾选：0/全量（预期；勾选发生在各阶段门）。
-- 计划评审门：**已通过**（两审查 PASS + F1–F11 修复落地 + 脚本复查）。剩余动作：编排者 commit → 派发 T-P0-01。
+- 计划评审门：**已通过**（两审查 PASS + F1–F11 修复落地 + 脚本复查）。
 
 > 终态目标行（达成后填写）：「DoD 达成，待人类 push/交付」。

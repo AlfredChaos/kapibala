@@ -19,7 +19,7 @@
 
 # P0 · 脚手架 + 契约 + 迁移 + A0 + seed + B3 后端（7 任务）
 
-### T-P0-01 workspace 脚手架与工程基建            [status: TODO]
+### T-P0-01 workspace 脚手架与工程基建            [status: DONE]
 - goal: 建立 pnpm workspace monorepo：根配置、四包骨架（package.json/tsconfig/vitest 配置/.env.example/包内 AGENTS.md 存根）、ESLint、docker-compose（postgres:16）、根脚本一次性预注册（含 demo:s1..s8 / e2e / db:migrate / db:seed，SP-5）；并为共享契约包建立**占位骨架**——`pnpm-workspace.yaml` 预收录 `packages/*`、四包 package.json 预声明 `"@kapibala/contract": "workspace:*"`、`packages/contract` 落最小占位文件（F1：否则前向声明的 workspace 依赖会使 `pnpm install` 在 T-P0-02 之前失败）。
 - refs: /Users/alfredchaos/home/work/kapibala/AGENTS.md §1–§2；DES/01-architecture.md §6.1、§6.4；DES/12-agent-service.md §6；DES/14-gateway-service.md §6
 - owned: /pnpm-workspace.yaml（预收录 packages/*）、/package.json、/tsconfig.base.json、/eslint.config.js、/docker-compose.yml、/.dockerignore、/scripts/README.md（仅占位说明；demo 脚本文件归 T-P3-11/T-P4-15/T-P6-08）、/AGENTS.md（根，命令同步）、packages/contract/package.json、packages/contract/tsconfig.json、packages/contract/src/index.ts（占位骨架：空导出 + 注释「类型由 T-P0-02 填充」）、server/package.json、server/tsconfig.json、server/vitest.config.ts、server/.env.example、server/AGENTS.md、web/package.json、web/tsconfig.json、web/vitest.config.ts、web/.env.example、web/AGENTS.md、mock-gateway/package.json、mock-gateway/tsconfig.json、mock-gateway/vitest.config.ts、mock-gateway/.env.example、mock-gateway/AGENTS.md、mock-agent/package.json、mock-agent/tsconfig.json、mock-agent/vitest.config.ts、mock-agent/.env.example、mock-agent/AGENTS.md
