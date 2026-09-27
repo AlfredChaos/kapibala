@@ -18,7 +18,8 @@ function statePath(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '.e2e-state.json');
 }
 
-/** backend.ts 装配完成才写 stage=ready（config 在拉起前已删旧文件——存在即本轮） */
+/** backend 启动即删旧文件、装配完才写 stage=ready——存在且 ready ⇒ 本轮数据（半写出由
+ *  JSON.parse 兜住；backend 没起来的话文件根本不存在/旧 id 会显性 404 失败）。 */
 async function readState(): Promise<E2eState> {
   for (let i = 0; i < 480; i++) {
     try {

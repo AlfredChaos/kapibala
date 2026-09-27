@@ -17,7 +17,6 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  globalSetup: './tests/e2e/global-setup.ts',
   webServer: [
     {
       command: '../node_modules/.bin/tsx ../server/tests/e2e/backend.ts 2>&1 | tee tests/e2e/.e2e-backend.log',

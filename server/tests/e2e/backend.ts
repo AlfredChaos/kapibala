@@ -3,7 +3,7 @@
 // boot() 全管线 server 固定在 :3000（vite.config.ts 代理的逐字目标 localhost:3000）。
 // 装配完数据（建群 active + agentEnabled + 一次已终态的 agent run）后写
 // web/tests/e2e/.e2e-state.json 并打 E2E_READY；进程常驻直到 SIGTERM（Playwright 清理）。
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -46,6 +46,7 @@ function stage(name: string, extra: Record<string, string> = {}): void {
 }
 
 async function main(): Promise<void> {
+  rmSync(STATE_PATH, { force: true }); // 启动即清旧文件：此后存在⇒本轮所写
   stage('boot');
   const db = await getTestDb();
   stage('db');
@@ -137,14 +138,30 @@ async function main(): Promise<void> {
   stage('armed');
   // 等首步行落库即可（不等到 run 终态——页面要的是「steps 可见」，首行 tool_use 即满足；
   // 并发测试负载下终态可能拖到分钟级，step 行在首轮响应写回时就已存在）
-  await waitFor(async () => {
-    const { rows } = await db.pool.query<{ n: number }>(
-      `SELECT count(*) AS n FROM agent_run_step s
-         JOIN agent_run r ON r.id=s.run_id WHERE r.group_id=$1`,
-      [group.dbGroupId],
-    );
-    return Number(rows[0]?.n ?? 0) >= 1;
-  }, 90000);
+  try {
+    await waitFor(async () => {
+      const { rows } = await db.pool.query<{ n: number }>(
+        `SELECT count(*) AS n FROM agent_run_step s
+           JOIN agent_run r ON r.id=s.run_id WHERE r.group_id=$1`,
+        [group.dbGroupId],
+      );
+      return Number(rows[0]?.n ?? 0) >= 1;
+    }, 180000);
+  } catch (err) {
+    // 装配超时诊断：run 行/队列行/网关账本各数一次——超时分「没触发」还是「触发但步未落」
+    const diag = async (q: string): Promise<number> => {
+      const { rows } = await db.pool.query<{ n: number }>(q, [group.dbGroupId]);
+      return Number(rows[0]?.n ?? 0);
+    };
+    console.error('[e2e] step wait timeout; diag:', {
+      runs: await diag(`SELECT count(*) AS n FROM agent_run WHERE group_id=$1`),
+      queued: await diag(`SELECT count(*) AS n FROM agent_trigger_queue WHERE group_id=$1`),
+      steps: await diag(
+        `SELECT count(*) AS n FROM agent_run_step s JOIN agent_run r ON r.id=s.run_id WHERE r.group_id=$1`,
+      ),
+    });
+    throw err;
+  }
   const { rows: runRows } = await db.pool.query<{ id: string }>(
     `SELECT id FROM agent_run WHERE group_id=$1 ORDER BY created_at DESC LIMIT 1`,
     [group.dbGroupId],
