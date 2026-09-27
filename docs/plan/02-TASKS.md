@@ -689,7 +689,7 @@
 
 # P5 · 前端页面 1–3 + B3 前端（5 任务，lane-D）
 
-### T-P5-01 web 骨架 + 登录页 + 401 单飞续期            [status: TODO]
+### T-P5-01 web 骨架 + 登录页 + 401 单飞续期            [status: DONE]
 - goal: Vite + React 18 + TS strict 骨架、fetch 封装（拦截 401 → 全局单飞 refresh → 重放；refresh 401 → 跳登录）、auth Context（存 access；refresh 由 HttpOnly cookie 承载，R-E 定稿）、登录页（页面 1）、路由守卫。
 - refs: DES/15-web-console.md §1、§2 页面 1、§4；DES/09-auth-module.md §3.4；REQ §4 页面 1、B3 前端行
 - owned: web/src/**（骨架、api/client.ts、api/auth.ts、auth/、pages/LoginPage.tsx、router.tsx）、web/tests/auth-refresh.test.tsx

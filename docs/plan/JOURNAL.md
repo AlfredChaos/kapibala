@@ -209,6 +209,14 @@
 - 踩坑：① 兄弟遗留测试断言「有 key 也拒起」（T-P4-02 埋的 TODO 语义）——provider 落地后契约语义翻转，用例同步更新而非删除。② `pnpm add @anthropic-ai/sdk` 后需 `--no-frozen-lockfile` 的坑在 pnpm-lock 已含 workspace:* 变更时成立——本卡直接成功（deps 变更是本次工作的合法部分）。③ hashline 工具两次把 edit 锚到错误函数区（`addGroup` 重复定义 / import 块错位）——密集同形段下必须逐次回读，不能连发。
 - VITEST 登记：C2、A-21（AGENT_URL 切换）应勾——按 SP-6 规则登记于此。
 
+
+## 2026-09-28 T-P5-01 B3-4 前端半边：web 骨架 + 登录页 + 401 单飞续期
+- 做了什么：`web/src/api/client.ts`（createApiClient：401 → 全局单飞 refresh（并发请求共享同一 promise）→ 成功后用新 accessToken 重放；refresh 401 → onSessionExpired 单点收口；`/api/auth/**` 豁免单飞通道——login 的 401 是业务结果 UNAUTHORIZED 不是会话过期，且 refresh 自身 401 即终局；全部请求 credentials:'include'，Bearer 仅 access token）+ `api/auth.ts`（login/logout 封装 + sessionStorage 会话持久化 restore/persist/clear——access token + user 的 JS 可读副本是 R-E 允许的「客户端 XSS 缓解」范围，refresh 永远只在 HttpOnly cookie）+ `auth/AuthProvider.tsx`（context { session, client, login, logout, expireSession }；client 为 useMemo 稳定单例——重建会丢进行中的单飞 promise；getAccessToken 经 ref 桥接读最新 session；canWrite 是 viewer 只读门的唯一判定收口）+ `pages/LoginPage.tsx`（页面 1：提交 → login → /accounts；失败按 error.code 显示，UNAUTHORIZED → 「用户名或密码错误」，其余 → HTTP_code；role=alert）+ `router.tsx`（RequireAuth 守卫：无会话 → <Navigate to="/login" replace/>；已登录访问 /login → /accounts；/accounts 占位页归 T-P5-02）+ `App.tsx` 接线 + `react-router-dom`、`happy-dom` 依赖 + `tests/auth-refresh.test.tsx`。
+- 验证命令与输出摘录：层 2 逐字——`cd web && npx vitest run` → **7/7**（并发两 401 → refresh 恰好一次 + 两请求均以新 Bearer 重放成功；refresh 请求带 credentials:'include'；refresh 也 401 → 单点 onSessionExpired → session=null → 守卫把 /accounts 弹回登录页；非 401(403) 不触发 refresh 不重放；viewer 登录 → role=viewer + canWrite=false；登录 401 → role="alert" 显示「用户名或密码错误」）；`npx tsc --noEmit`（include 已加 tests）+ `npx eslint` → 0；`npx vite build` → ✓ 238 kB。
+- 偏差与【解读】：① B3 前端半边的「清空会话跳 /login」按完整链断言：expireSession 清 session → RequireAuth 重渲染 → <Navigate>——层 2 无真实浏览器，用 createMemoryRouter + RequireAuth 直挂重放整个跳转路径。② 「viewer 看不到写操作按钮」钉在 canWrite 判定收口 + viewer 会话两侧——骨架期页面尚无写按钮，门机制本身是被测对象。
+- 踩坑：① 登录失败的 401 必须先单飞通道豁免（`/api/auth/` 前缀短路）——否则 login 的 UNAUTHORIZED 会被 refresh 流程吞掉、页面看到 HTTP_404 而非密码错误；这是「401→refresh」拦截器的第一条业务语义边界。② hashline edit 工具多次锚错位（AuthProvider/LoginPage/client.ts 各一次）——小文件直接 rewrite 更稳。
+- VITEST 登记：B3-4（web 层 2）、A6 页面 1 部分应勾——00-SPEC.md 行已登记（勾选状态阶段门维护）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
