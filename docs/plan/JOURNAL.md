@@ -127,6 +127,15 @@
 - 偏差与【解读】：① 解读 #20 的 sinceSeq 语义取字面「表里已无该行」——`sinceSeq ≥ min(seq)` 不告警；`sinceSeq=0` 是 BIGSERIAL 前的哨兵（全量回放）而非过期，豁免告警。② 水位钳制 `min(sinceSeq,maxSeq)`：超前水位不是过期场景、回放集为空，若采信则永不可达——钳制后最坏多收 ≤ 窗口行（客户端 seq 去重吸收，B4）。③ min/max 用单条聚合同一快照取，避免两次查询之间行被清/被插撕裂判定。④ hub.close() 必须在 app.close() 之前：WS 升级连接不属于 fastify 生命周期，不先断开会挂住 server.close()。
 - 踩坑：sinceSeq 水位自陷 + 0 哨兵误报（详见 AGENTS.md §7 同日条目）。
 - VITEST 登记：§5.2 的 I7（hub.test.ts）、I12（sinceseq.test.ts）、A-18/19、A4-2、B4-1（服务端半边）应勾——按 SP-6 规则登记于此，勾选在阶段门统一执行。
+
+---
+
+## 2026-09-28 T-P2-07 限流登记 / 硬闸门 / 到期恢复（D2-5）
+- 做了什么：`server/src/modules/accounts/rate-limit.ts` 落地三段契约——`registerRateLimit`（单事务：SELECT FOR UPDATE 锁行取转移前值 → 状态守卫 UPDATE `WHERE status IN ('online','rate_limited')` + `until=greatest(now(),rate_limited_until)+retryAfterSeconds`；online→rate_limited 才补 ws_event，rate_limited 再 429 只顺延不转移）、`checkRateLimit`（每次 send 前逐条 SELECT 的硬闸门，不缓存——S4 零试探根基；到期未转移行放行，未知账号 ACCOUNT_NOT_FOUND）、`createRateLimitExpiryScan`（条件 UPDATE 收拢到期行 + 同事务 ws_event + 事务外 wakeDispatcher 缝）。`server/src/scheduler/ratelimit-scan.ts` 注册行（`rate-limit-expiry`），index.ts boot 接线。
+- 验证命令与输出摘录：**先红后绿**——测试文件先行报「module not found」，实现后 `npx vitest run tests/accounts/rate-limit.test.ts` → **7 passed**；全量 `npx vitest run` → 169 passed / 15 文件（另有 1 文件 = 兄弟任务 T-P2-06 的 terminal-side-effects.test.ts 半成品红，非本卡范围）；`npx tsc --noEmit` 对本卡文件 0 错（TS2307 报的全是兄弟未落地 import）；eslint clean。覆盖断言：until 顺延从旧 until 末尾起算（±3s 容差）；竞态下 until 恒 NULL + warn×3；闸门对 已到期未转移 / online / disconnected / unknown 四分支分明；到期扫描唤醒缝收到正确 accountId 且二轮幂等归零。
+- 偏差与【解读】：① 竞态分支用「SELECT FOR UPDATE + 条件 UPDATE」两步实现 §5.1 的 rowcount=0 语义——行锁保证守卫与转移前值判定同一快照，比裸 UPDATE RETURNING 更贴「只允许两态写限流字段」的逐字语义。② 到期扫描与 T-P2-05 的 boot 恢复扫描（runAccountsRecoveryScan §a）共用同一条条件 UPDATE 语义：boot 段收「进程停了错过到期」的补转，本扫描是常驻节拍的常态路径；不重提 transitions.ts 以免撞兄弟正在编辑的终端副作用六动作。③ wakeDispatcher 为可选缝：T-P3-02 dispatcher 未落地，恢复转移本身照常发生，queued 消息由 dispatcher 轮询拾取（DB 为真值）。
+- 踩坑：无新坑（竞态守卫沿用 enterTerminal 的 SELECT FOR UPDATE 先例）。
+- VITEST 登记：D2-5、A1-3/7、G-15 应勾——按 SP-6 规则登记于此。
 ---
 
 <!-- 后续任务条目按上述格式在此追加。示例：

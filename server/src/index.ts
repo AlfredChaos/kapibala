@@ -25,6 +25,7 @@ import type { RecoveryScan } from './recovery/scans.js';
 import { createScheduler, type Scheduler } from './scheduler/index.js';
 import { createScanRegistry, type ScanRegistry } from './scheduler/registry.js';
 import { registerDeadLetterScan } from './scheduler/deadletter-scan.js';
+import { registerRateLimitScan } from './scheduler/ratelimit-scan.js';
 import { attachWsHub, type WsHub } from './ws/hub.js';
 import { createWsEventRetentionScan, WS_EVENT_RETENTION_SCAN_NAME } from './ws/retention.js';
 
@@ -136,9 +137,11 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   });
 
   // 4. 调度器（1s 周期扫描注册表；扫描抛错 → error 日志且调度器不退出）。
-  //    已接线扫描：dead-letter（T-P2-04，5s 节流）、ws-event-retention（T-P2-10，30min 窗口清理）。
+  //    已接线扫描：dead-letter（T-P2-04，5s 节流）、rate-limit-expiry（T-P2-07，到期回 online）、
+  //    ws-event-retention（T-P2-10，30min 窗口清理）。
   const registry = options.registry ?? createScanRegistry();
   registerDeadLetterScan({ pool, registry, dispatch, logger });
+  registerRateLimitScan({ pool, registry, logger }); // T-P2-07：rate_limited 到期回 online + 唤醒 dispatcher 缝
   registry.register(WS_EVENT_RETENTION_SCAN_NAME, createWsEventRetentionScan({ pool }));
   // WS hub（T-P2-10）：挂在共享 app.server 的 /ws 升级路径（DES/01 同端口）；
   // 监听前先 attach——upgrade 监听随 listen 生效，boot 测试断言 attach 顺序无要求。
