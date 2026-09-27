@@ -1,0 +1,14 @@
+# 构建上下文裁剪（T-P0-01）：密钥与本地产物绝不进镜像
+.git
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+.env
+**/.env
+*.log
+*.tsbuildinfo
+docs
+media

@@ -1,0 +1,21 @@
+{
+  "name": "server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts"
+  },
+  "dependencies": {
+    "@kapibala/contract": "workspace:*",
+    "fastify": "^5.12.5",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "ws": "^8.22.0"
+  }
+}

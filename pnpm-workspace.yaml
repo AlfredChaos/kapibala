@@ -1,0 +1,12 @@
+# T-P0-01：workspace 收录四个服务目录 + packages/*（SP-1/F1：共享契约包 @kapibala/contract
+# 必须与四个服务同仓收录，否则 T-P0-01 预声明的 workspace 依赖在 T-P0-02 填充类型前无法 install）
+packages:
+  - server
+  - web
+  - mock-gateway
+  - mock-agent
+  - 'packages/*'
+
+# esbuild 的 postinstall 只做原生二进制校验/软链，放行（pnpm 10 默认拦截 build 脚本）
+onlyBuiltDependencies:
+  - esbuild

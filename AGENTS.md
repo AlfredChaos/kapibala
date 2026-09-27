@@ -24,6 +24,7 @@ pnpm -F server db:seed      # 预置服务账号与 admin / viewer 用户（幂�
 ```
 
 > 脚手架落地后**必须逐条运行验证**；命令、脚本名、端口变化时同步更新本文件。
+> 脚手架阶段（T-P0-01）补充：`db:migrate` / `db:seed` 的实现分别在 T-P0-04 / T-P0-06 落地（脚本名已预注册）；`pnpm demo:s1..s8` / `pnpm e2e` 的预注册说明见 `scripts/README.md`。
 
 默认端口：server `:3000` · web `:5173` · mock-gateway `:4100` · mock-agent `:4200`（scripted；anthropic 实例 `:4300`，C2 按需）· postgres `:5432`（各包 `.env.example` 为准）。
 

@@ -1,0 +1,21 @@
+# T-P0-01：仅 PostgreSQL（AGENTS.md §1）。dev 库凭据与 server/.env.example 的 DATABASE_URL 对齐。
+services:
+  postgres:
+    image: postgres:16
+    container_name: kapibala-postgres
+    environment:
+      POSTGRES_USER: kapibala
+      POSTGRES_PASSWORD: kapibala
+      POSTGRES_DB: kapibala
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kapibala -d kapibala']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

@@ -1,0 +1,35 @@
+{
+  "name": "kapibala",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.11.0",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r typecheck",
+    "demo:s1": "tsx scripts/demo/s1.ts",
+    "demo:s2": "tsx scripts/demo/s2.ts",
+    "demo:s3": "tsx scripts/demo/s3.ts",
+    "demo:s4": "tsx scripts/demo/s4.ts",
+    "demo:s5": "tsx scripts/demo/s5.ts",
+    "demo:s6": "tsx scripts/demo/s6.ts",
+    "demo:s7": "tsx scripts/demo/s7.ts",
+    "demo:s8": "tsx scripts/demo/s8.ts",
+    "e2e": "pnpm -F web exec playwright test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "eslint": "^10.11.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
+  }
+}
