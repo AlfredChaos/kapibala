@@ -49,36 +49,42 @@ const KNOWN_SWITCHES: readonly string[] = [
 ];
 
 /**
- * 账号域开关的最小即时接线（开关 11/12）：scenario 打开即置终态标志，
- * clear 即撤销——「指定账号所有请求回同码」由 accounts.ts 的闸门读标志实现。
- * 其余开关只登记配置，行为接线归各自域的任务。
+ * 账号域开关的即时接线（开关 11/12）：scenario 打开即置终态标志，clear 即撤销。
+ * 返回错误信息 = arrange 失败（target.accountId 给了但账号不存在 → 调用方 400）：
+ * 测试平面契约是「拼错目标必须在 arrange 阶段炸」，不静默无效、不自动建号。
+ * clear 路径（enabling=false）对已消失的账号宽容——只做拆除，不做断言
+ * （reset 恢复种子后 clear 旧开关是合法时序）。
  */
 function applyAccountDomainSwitch(
   state: GatewayState,
   switchName: string,
   config: SwitchConfig,
   enabling: boolean,
-): void {
-  const accountId = typeof config.target?.['accountId'] === 'string' ? config.target['accountId'] : undefined;
-  if (accountId === undefined) {
-    return;
+): string | null {
+  if (switchName !== 'account_suspended_403' && switchName !== 'session_expired_401') {
+    return null;
   }
-  const account = state.accounts.get(accountId);
+  const target = config.target?.['accountId'];
+  if (typeof target !== 'string') {
+    return null; // 未给 target：不适用账号域接线（开关登记仍成功，行为接线归后续域任务）
+  }
+  const account = state.accounts.get(target);
   if (account === undefined) {
-    return;
+    return enabling ? `unknown target account: ${target}` : null;
   }
   if (switchName === 'account_suspended_403') {
     account.suspended = enabling;
-  }
-  if (switchName === 'session_expired_401') {
+  } else {
     account.sessionExpired = enabling;
   }
+  return null;
 }
 
 export function registerTestPlane(app: FastifyInstance, state: GatewayState): void {
   // POST /_test/scenario { switch, params?, target? }：打开开关；重复调用 = 覆盖参数（DES/14 §4）
   app.post('/_test/scenario', async (request, reply) => {
-    const body = request.body as { switch?: unknown; params?: unknown; target?: unknown };
+    // 空 body 防 500：undefined.switch 会 TypeError；?? {} 让校验分支给出正确的 4xx
+    const body = (request.body ?? {}) as { switch?: unknown; params?: unknown; target?: unknown };
     const switchName = body.switch;
     if (typeof switchName !== 'string' || !KNOWN_SWITCHES.includes(switchName)) {
       return reply
@@ -98,14 +104,18 @@ export function registerTestPlane(app: FastifyInstance, state: GatewayState): vo
       }
       config.target = body.target as Record<string, unknown>;
     }
+    const applyError = applyAccountDomainSwitch(state, switchName, config, true);
+    if (applyError !== null) {
+      // arrange 期失败：开关不登记（半生效状态比拒绝更糟）
+      return reply.code(400).send({ message: applyError });
+    }
     state.switches.set(switchName, config);
-    applyAccountDomainSwitch(state, switchName, config, true);
     return reply.send({ ok: true });
   });
 
   // POST /_test/scenario/clear { switch? }：关闭指定/全部开关（DES/14 §4）
   app.post('/_test/scenario/clear', async (request, reply) => {
-    const body = request.body as { switch?: unknown };
+    const body = (request.body ?? {}) as { switch?: unknown };
     if (body.switch === undefined) {
       for (const [name, config] of state.switches) {
         applyAccountDomainSwitch(state, name, config, false);
@@ -144,7 +154,7 @@ export function registerTestPlane(app: FastifyInstance, state: GatewayState): vo
   // POST /_test/emit { type, data }：手动注入事件——只入账本，走正常 SSE 投放（DES/14 §4）。
   // eventId 由分配器指派并在 data 中补齐（SSE 帧契约：data 同时带 eventId 与 type）。
   app.post('/_test/emit', async (request, reply) => {
-    const body = request.body as { type?: unknown; data?: unknown };
+    const body = (request.body ?? {}) as { type?: unknown; data?: unknown };
     if (!isGatewayEventType(body.type)) {
       return reply.code(400).send({ message: 'type must be one of the six contract event types' });
     }

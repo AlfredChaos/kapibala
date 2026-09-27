@@ -252,3 +252,44 @@ describe('/_test 平面入参校验', () => {
     expect(typeof (res.json() as { emittedAt: number }).emittedAt).toBe('number');
   });
 });
+
+describe('T-P1-01 review：空 body 防护与未知 target 拒绝', () => {
+  it('scenario / emit 空 body → 400（校验错误），不是 500 TypeError', async () => {
+    const app = newApp();
+    const scenario = await app.inject({ method: 'POST', url: '/_test/scenario' });
+    expect(scenario.statusCode).toBe(400);
+    expect((scenario.json() as { message: string }).message).toContain('unknown switch');
+
+    const emit = await app.inject({ method: 'POST', url: '/_test/emit' });
+    expect(emit.statusCode).toBe(400);
+    expect((emit.json() as { message: string }).message).toContain('six contract event types');
+  });
+
+  it('scenario/clear 空 body = 清除全部开关（200，设计语义而非 400）', async () => {
+    const app = newApp();
+    await app.inject({
+      method: 'POST',
+      url: '/_test/scenario',
+      payload: { switch: 'account_suspended_403', target: { accountId: 'acc-01' } },
+    });
+    const res = await app.inject({ method: 'POST', url: '/_test/scenario/clear' });
+    expect(res.statusCode).toBe(200);
+    // 开关已清：终态随之撤销（connect 恢复可用）
+    const connect = await app.inject({ method: 'POST', url: '/accounts/acc-01/connect' });
+    expect(connect.statusCode).toBe(200);
+  });
+
+  it('账号域开关指向不存在的账号 → 400 且开关不登记（arrange 期失败，不静默无效）', async () => {
+    const app = newApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/_test/scenario',
+      payload: { switch: 'account_suspended_403', target: { accountId: 'acc-99' } },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { message: string }).message).toContain('unknown target account: acc-99');
+    // 半生效防护：拒绝后开关未登记（clear 该开关是无害 no-op，但 switches 表应为空）
+    expect(app.gatewayState.switches.size).toBe(0);
+    expect(app.gatewayState.accounts.has('acc-99')).toBe(false); // 不自动建号
+  });
+});
