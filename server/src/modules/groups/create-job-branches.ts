@@ -30,6 +30,8 @@ export interface JobRow {
   status: string;
   phase: string;
   payload: { creatorAccountId: string; memberAccountIds: string[] };
+  /** §7 形状的错误表（leave-all 判群主要不要退；create_group 用不到但同列共享） */
+  errors: Array<{ step: string; code: string }>;
   context: {
     inviteLink?: string;
     /** invite 返回的就绪时刻（epoch ms）：join 不得早于此（INVITE_NOT_READY 自然路径） */
@@ -46,7 +48,7 @@ export interface JobRow {
 
 export async function readJob(client: PoolClient, jobId: string): Promise<JobRow | null> {
   const { rows } = await client.query<JobRow>(
-    'SELECT id, status, phase, payload, context, group_id, join_deadline_at FROM job WHERE id=$1 FOR UPDATE',
+    'SELECT id, status, phase, payload, context, group_id, join_deadline_at, errors FROM job WHERE id=$1 FOR UPDATE',
     [jobId],
   );
   return rows[0] ?? null;
