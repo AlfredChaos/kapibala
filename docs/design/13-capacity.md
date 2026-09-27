@@ -34,7 +34,7 @@
 | 3 外部成员 | **不建成员行**（容量决策已落 [04](04-group-module.md) §4）：契约 `members` 字段只含服务账号、kick 判定查网关列表（[06](06-agent-module.md) §8.5）、agent 触发靠 `ownPlatformUserIds`——三个消费方都不需要外部成员实体。外部成员的存在只体现为事件量与消息行（`sender_platform_user_id` 字符串），随轴 4 一起评估 |
 | 4 消息摄入 | 每事件一个小事务（[08](08-realtime-module.md) §1.2）：均值 1–2/s 毫无压力；群内突发 100/s × 单事务 ~2–5ms ≈ 占用单消费者 20–50% 时间，可承受；**补投风暴瞬时 ×10–50（10³–5×10³ 事件/s）是唯一超设计点**——但风暴的本质是**历史回放**（`eventId` 新、`msgId`/`sentAt` 原值），去重键 `(groupId, msgId)` 天然幂等（[05](05-messaging-module.md) §3 / [08](08-realtime-module.md) §1.2 已覆盖，正确性不破，只是吞吐滞后），且网关保留全部历史 → 消费慢了靠 `since` 补拉追上，不丢。应对手段见 §5 微批注记 |
 | 5 出站 | ~10⁴/天受账号限流钳制；每账号串行走独立 advisory lock（[05](05-messaging-module.md) §2.2）——1,000 账号 = 1,000 条并行通道，无聚合瓶颈 |
-| 6 Agent runs | 2,000→10⁴/天：并发受 `AGENT_MAX_CONCURRENT_RUNS`（默认 50，[06](06-agent-module.md) §2.1）钳制；60s 墙钟 → 理论上限 ≈ 50 × 86400/60 ≈ 7.2×10⁴ run/天 >> 压力点。每群单飞 + 租约回收（[06](06-agent-module.md) §9.4）保证并发不泄漏 |
+| 6 Agent runs | 2,000→10⁴/天：并发受 `AGENT_MAX_CONCURRENT_RUNS`（默认 50，[06](06-agent-module.md) §2.1）钳制；60s 墙钟 → 理论上限 ≈ 50 × 86400/60 ≈ 7.2×10⁴ run/天 >> 压力点。每群单飞 + 租约观测（[06](06-agent-module.md) §9.4）保证并发不泄漏 |
 | 7 操作台 | 忽略 |
 
 **「不引入」的确认**（对应 [01](01-architecture.md) §1 / §9 的取舍）：

@@ -41,13 +41,14 @@ flowchart TD
     MSG["入站外部消息插入成功<br/>(§05 §4.4,判定条件:<br/>group.status='active' AND agent_enabled=true)"] --> TRI{"INSERT agent_run<br/>status='running'<br/>ON CONFLICT 每群单飞行索引 DO NOTHING"}
     TRI -->|"成功"| NEW["新 run:<br/>trigger_context.triggerMessages=[该消息]<br/>(按 sentAt 升序)<br/>→ 启动 executor(§5)"]
     TRI -->|"冲突(已有 running)"| PEND["INSERT agent_trigger_queue<br/>(group_id, message_id) ON CONFLICT DO NOTHING"]
-    END2["run 结束事务(同一事务内):<br/>1. 旧 run 置终态<br/>2. SELECT 积压 trigger_queue WHERE group_id=?<br/>3. 若非空: DELETE 积压行 + INSERT 新 run<br/>   (triggerMessages=全部积压消息,按 sentAt 升序)<br/>4. ws_event(agent_run ×2: 旧终态+新 running)"]
+    END2["run 结束事务(同一事务内):<br/>1. 旧 run 置终态<br/>2. SELECT 积压 trigger_queue WHERE group_id=?<br/>3. 若非空: 先查守卫 group.status='active' AND<br/>   agent_enabled=true(与入站触发路径 05 §4.4 同判)——<br/>   守卫过: DELETE 积压行 + INSERT 新 run<br/>   (triggerMessages=全部积压消息,按 sentAt 升序);<br/>   守卫不过: 积压行保留不删,不补建 run<br/>(agentEnabled 重新打开后由 SWEEP 补建)<br/>4. ws_event(agent_run ×2: 旧终态+新 running,仅守卫过时)"]
     END2 -->|"新 run 创建"| NEW
-    SWEEP["调度器兜底(每 5s):<br/>有积压但无 running run 的群 → 补建 run<br/>(防 run 结束事务外崩溃导致的漏建)"] --> END2
+    SWEEP["调度器兜底(每 5s):<br/>有积压但无 running run 的群 → 补建 run<br/>(防 run 结束事务外崩溃导致的漏建)<br/>补建前同守卫: group.status='active' AND agent_enabled=true;<br/>守卫不过则保留积压行不删,下轮再查"] --> END2
 ```
 
 - 单飞行靠 `uq_agent_run_single_flight` 部分唯一索引——**多实例部署成立**（A5-1），进程内无任何判定。
 - 「立即创建下一次 run」：结束与新建在同一事务，原子。
+- **补建守卫（END2 第 3 步与 SWEEP 同判）**：补建 run 前复查 `group.status='active' AND agent_enabled=true`（与入站触发路径 [05](05-messaging-module.md) §4.4 同判）。守卫不过时**不补建 run，积压行保留不删**——run 因 unreachable / 关闭 agentEnabled 被 cancelled 后，积压不再立即催生「出生即取消」的 run；agentEnabled 重新打开后由 SWEEP 用积压补建，恰好实现「重新启用后补处理」（README 解释声明 #26）。
 - executor 启动竞争（多实例/恢复并发）：`pg_try_advisory_lock('agent-run:'+runId)`，抢到的实例执行，抢不到的退出。
 
 ### 2.1 拾取、租约与全局并发闸（容量设计，[13](13-capacity.md) §3 轴 6）

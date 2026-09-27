@@ -27,7 +27,7 @@ flowchart TD
 |---|---|---|
 | account | `accountId → { platformUserId(确定性派生,同 id 恒同值), online, suspended, sessionExpired, rateLimitedUntil? }` | §2.1「同 accountId 每次 connect 返回同一 platformUserId」；suspended/session_expired 后**所有请求**回同码 |
 | group | `groupId → { creator, members: Set<puid>, writeForbidden, invite?: { link, readyAt, expireAt? } }` | 建群即含 creator；解散/禁言开关置 `writeForbidden` |
-| message | `clientMsgId → { groupId, senderPuid, msgId, text, sentAt, landed }` | **网关不按 clientMsgId 去重**——同 id 两条是两条落地记录（by-client-id 返回最早一条，契约 §2.1） |
+| message | `clientMsgId → […有序列表（落地序），每项 { groupId, senderPuid, msgId, text, sentAt, landed }]` | **网关不按 clientMsgId 去重**——同 id 两条是两条落地记录，各占列表一项（by-client-id 返回最早一条，契约 §2.1） |
 | 账本帧 | `{ eventId, type, data, emittedAt }` | at-least-once / 乱序 ≤1s / 补投由推送器按开关修饰后投递 |
 
 `POST /groups` 的网关群 id 与外部用户成员（供 `external_member_events` 开关）由 mock 自造（`gw-<seq>` / `ext-<seq>`）。
@@ -45,7 +45,7 @@ flowchart TD
 | join → `member_joined` | 100–1500ms，**或永不到** | `member_joined_delay` / `member_joined_never` |
 | invite | `readyAfterMs` 0 或数秒；链接任意时刻可过期 | `invite_not_ready` / `invite_expired` |
 | 乱序窗口 | 相邻事件 ≤1s | 推送器对相邻帧按开关交换投递顺序 |
-| 补投 | eventId 新、msgId/sentAt 原值，不受窗口限制 | `offline_backlog`：断开 SSE 后产生的帧在重连回放时全部重发 |
+| 补投 | eventId 新、msgId/sentAt 原值，不受窗口限制 | `offline_backlog`：**账号离线补投**（开关注入补投帧，见 §5 gw-5）；SSE 断线重连回放是 `since` 默认行为，无需开关 |
 
 ## 4. `/_test` 控制平面（测试 arrange 的唯一入口）
 
@@ -67,7 +67,7 @@ flowchart TD
 | 2 | `message_sent_delay` | `message_sent` 延迟（区间或钉值） | §2.1 | accepted→sent 流转 + WS 原地更新 | S1 |
 | 3 | `dup_push_all` | **每个事件推两次** | §2.1 / S2 | `gateway_event` PK、`(groupId,msgId)` 唯一、agent 触发幂等（[08](08-realtime-module.md) §1.2 / [05](05-messaging-module.md) §3/§4.4） | S2 |
 | 4 | `reorder_1s` | 相邻事件乱序 ≤1s（含 `message` 先于 `message_sent`） | §2.1 | 连续前缀游标（[08](08-realtime-module.md) §1.3）+ `finalizeSent` 合并（[05](05-messaging-module.md) §4.3，D1-3） | — |
-| 5 | `offline_backlog` | 断线期间事件补投（sentAt 原值任意早） | §2.1 | keyset 排序 + 去重（[05](05-messaging-module.md) §3/§5） | — |
+| 5 | `offline_backlog` | **账号离线补投**，非 SSE 重连回放（`since` 回放是默认行为，与开关无关）：开关打开时，对账号离线期间产生的待补投消息注入补投帧——**新 eventId、原 msgId/sentAt**，不受乱序窗口限制；注入机制 = `/_test/emit` 配方（§4：手动注入事件入账本，走正常 SSE 投放），按离线窗口逐条 emit | §2.1 | keyset 排序 + 去重（[05](05-messaging-module.md) §3/§5） | — |
 | 6 | `rate_limit` | send → `429 { retryAfterSeconds }`；**期内任何 send 再 429 且计时重置** | §2.1 / A2 | 限流硬闸门（[03](03-account-module.md) §5）；counters 断言零试探 | S4 |
 | 7 | `send_504_land_1500` | 第一次 send → 504，**1.5s 后落地**并推 `message_sent` | §2.1 / S5 | unknown 判定（[05](05-messaging-module.md) §2.4） | S5 |
 | 8 | `send_504_not_sent` | send → 504 且确实未发出（by-client-id 恒 404） | §2.1 | 判定器「确认未发出→重发一次」（resend_count≤1） | — |

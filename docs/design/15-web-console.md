@@ -19,7 +19,7 @@
 
 | 页面 | 路由 | 数据源（REST + WS） | 关键交互与状态规则 |
 |---|---|---|---|
-| 1 登录 | `/login` | `POST /api/auth/login` | 存 access/refresh；错误按 `error.code` 显示（`UNAUTHORIZED`）；登录后跳 `/accounts` |
+| 1 登录 | `/login` | `POST /api/auth/login` | 存 access（refresh 由 HttpOnly cookie 承载）；错误按 `error.code` 显示（`UNAUTHORIZED`）；登录后跳 `/accounts` |
 | 2 账号列表 | `/accounts` | `GET /api/accounts` + WS `account_status_changed` / `account_terminal` | 每行：状态徽标、`platformUserId`、`rateLimitedUntil`（倒计时）。**connect 按钮**：仅 `idle/disconnected` 可见可用（[03](03-account-module.md) §2 前置集合）；**transition 面板**：`expectedFrom` 取当前状态，`to` 只列转移表上该状态的合法目标（静态表与 03 §1 同源；`to='rate_limited'` 时必须填 `rateLimitedUntil`，D3-4）——**非法目标不出现在 UI**，把 `ILLEGAL_TRANSITION` 留给并发竞争。viewer：写操作按钮不渲染（`role` 来自会话） |
 | 3 群详情/时间线 | `/groups/:id` | `GET /api/groups/:id`、`GET /api/groups/:id/messages?before=` + WS `message` / `sequence_run` / `agent_run` / `inconsistency` / `job` | 时间线 = keyset 分页（§5）+ WS 原地更新；自己消息按 `clientMsgId` 显示 `deliveryStatus` 徽标（queued→accepted→sent / failed(failCode) / cancelled）；**agent run blocked 醒目提示**（顶部横幅 + run 区块标红，A5 audit_blocked 可操作员可见）；发送表单（选账号 + text，前端先做非空与 `TEXT_MAX_LENGTH` 校验）；开关 `agentEnabled`/`autoKickEnabled`（viewer 只读）；页面含最近 run 列表入口 |
 | 4 Agent run 详情 | `/agent-runs/:id` | `GET /api/agent-runs/:id` + WS `agent_run` | steps 时间线：每步 `kind`/工具名/`input`/`resultSummary`/`isError+errorCode`/`auditVerdict`/`rawResponse`（折叠展示，2KB 截断已由后端做）；协议错误步显示 `errorCode`（`toolUseId/name/input=null`）；blocked/failed 的 `endReason` 徽标 |

@@ -86,13 +86,14 @@
 | D1-1 死信三写同事务 | 制造永久性业务写失败（孤儿群 FK）→ 死信事务成功、消费循环推进、账本有行 | `tests/events/dead-letter.test.ts` | ☐ |
 | D1-2 终态 × 在途发送 | send 在途时注入终态事件 → 行转 unknown 而非 cancelled；202 回写落 accepted；回流不产生第二行 | `tests/accounts/terminal-side-effects.test.ts` | ☐ |
 | D1-3 finalizeSent 合并 | 乱序窗口 message→message_sent / by-client-id 200 补投两路径 → 稳态恰一行、序列步骤联动 | `tests/messages/finalize-sent.test.ts` | ☐ |
-| D2-1 成员事件乱序 | left(E2) 先到 joined(E1) 后到 → 终态账号不复活；joined 在途终态 → 墓碑行 | `tests/groups/member-projection.test.ts` | ☐ |
+| D2-1 成员事件乱序 | left(E2) 先到 joined(E1) 后到 → 终态账号不复活；joined 在途终态 → 墓碑行；迟到 joined 在终态处理之后到达且 event_id > last_event_id → 不复活（STALE 处理）；墓碑行冲突时 last_event_id 单调推进（GREATEST，双 leave 循环不复活） | `tests/groups/member-projection.test.ts` | ☐ |
 | D2-2 ALREADY_MEMBER | gw-22 → 成员行 UPSERT、promote 后 role=admin、GET members 含该账号 | `tests/groups/create-group-job.test.ts` | ☐ |
 | D2-5 限流登记守卫 | 429 与 disconnected 竞态 → rate_limited_until 恒 NULL（非 rate_limited 态） | `tests/accounts/rate-limit.test.ts` | ☐ |
 | X-1 kick 码表 | gw-24(504 仍在)/gw-17 → tool_result.code ∈ 13 码表（SEND_FAILED），细节在 message | `tests/agent/tools-kick.test.ts` | ☐ |
 | X-2 取消检查点 | send_message 步中关闭 agentEnabled → 当前步含 tool_result 完整落库、run cancelled、无悬挂 tool_use | `tests/agent/turn-loop.test.ts` | ☐ |
 | D3-1 孤儿事件 | 未知群 message 事件 → 账本+inconsistency、不进死信 | `tests/events/dead-letter.test.ts` | ☐ |
 | D3-4 手动限流入参 | transition to=rate_limited 缺 rateLimitedUntil → 400 | `tests/accounts/transition.test.ts` | ☐ |
+| R-B 守卫 | END2/SWEEP 补建前复查 group.status+agent_enabled；守卫不过时积压行保留 | `tests/agent/trigger-queue-guard.test.ts` | ☐ |
 
 ## 6. 进度总览
 
@@ -101,4 +102,4 @@
 - [ ] gw-1–28（28 项开关各有代表用例）
 - [ ] ag-1–19（19 项开关各有代表用例）
 - [ ] 崩溃注入 4 点
-- [ ] 审查回归 10 项
+- [ ] 审查回归 11 项

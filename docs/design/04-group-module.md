@@ -89,7 +89,7 @@ flowchart TD
 - **ALREADY_MEMBER**：视为成功，直接计入 joined（B2）；注意此时网关**不会**推 `member_joined`（§2.1），等待逻辑必须能区分「waiting」与「joined」。成员行由 job 事务 **UPSERT 兜底**（`role=member`，§4 例外 3，D2-2）——若不写，该账号在成员表永远缺行，promote 的 `UPDATE role='admin'` 命中 0 行静默落空、`GET /api/groups/:id` 缺成员，违反「建群完成时 memberAccountIds[0] 已是管理员」的可见结果。
 - **member_joined 10s 超时** → `JOIN_TIMEOUT`，`errors[].step = join:<accountId>` 精确到超时的那个成员（A2）。
 - **promote 调用总数 ≤ 2**（A2）：`context.promoteCalls` 计数持久化，崩溃恢复后继续累计；达到 2 次仍 `NOT_MEMBER_YET` → job failed（`step=promote`）。
-- **成员表写入时机**（A3）：creator 在建群成功事务内写入；其余成员一律在 `member_joined` 事件处理路径写入（§4）——job 执行器**不直接写**非 creator 成员，只更新 job.context 状态。
+- **成员表写入时机**（A3）：creator 在建群成功事务内写入；其余成员一律在 `member_joined` 事件处理路径写入（§4）——除 §4 三个例外（creator 建群成功、promote 提升角色、ALREADY_MEMBER 的 job UPSERT 兜底），job 执行器**不直接写**非 creator 成员，只更新 job.context 状态。
 
 ### 2.3 建群时序图（正常路径）
 
@@ -191,7 +191,7 @@ flowchart TD
 
 **唯一写入源**是事件处理路径（join 之外）与三个例外（creator 建群成功、promote 提升角色、ALREADY_MEMBER 的 job UPSERT 兜底——D2-2）。
 
-**乱序防线（D2-1）**：契约允许相邻成员事件乱序 ≤1s——`member_left`(E2) 可能先于 `member_joined`(E1) 到达（账号入群后 1s 内被踢/进终态）。若无防线，「left 无行→跳过；joined 无行→INSERT 活跃行」会把已离群账号投影成活跃成员。规则：**活跃性只随事件 id 单调推进**——`group_member.last_event_id` 记录最近一次改变活跃性的事件，成员事件仅在 `event_id > last_event_id` 时才允许改变活跃性；`member_left` 无行时插入**墓碑行**（`left_at=now(), last_event_id=E`）而非跳过，迟到的更小 id `member_joined` 只补 `joined_at`、不复活。
+**乱序防线（D2-1）**：契约允许相邻成员事件乱序 ≤1s——`member_left`(E2) 可能先于 `member_joined`(E1) 到达（账号入群后 1s 内被踢/进终态）。若无防线，「left 无行→跳过；joined 无行→INSERT 活跃行」会把已离群账号投影成活跃成员。规则：**活跃性只随事件 id 单调推进**——`group_member.last_event_id` 记录最近一次改变活跃性的事件，成员事件仅在 `event_id > last_event_id` 时才允许改变活跃性；`member_left` 无行时插入**墓碑行**（`left_at=now(), last_event_id=E`）而非跳过，迟到的更小 id `member_joined` 只补 `joined_at`、不复活。复活分支（有行且 `left_at` 非空、`E > last_event_id`）与 INSERT 分支（I1）**对称地先查账号终态**：`terminal_at` 非空 → 按 STALE 处理（只补 `joined_at`、不复活为活跃行）——leave(E2)→rejoin(E3) 的 joined 事件迟到至终态处理（account_status / 同步错误）之后到达时，E3 仍可能大于行上 `last_event_id`，若不查终态会把终态账号复活为活跃成员，违反「终态时从所有群成员表移除」。墓碑行冲突时在同一事务内 `ON CONFLICT DO UPDATE SET last_event_id = GREATEST(last_event_id, EXCLUDED.last_event_id)` 仍单调推进——否则双 leave 循环下，迟到的 joined 可越过墓碑这道第二道防线。
 
 ```mermaid
 flowchart TD
@@ -212,13 +212,13 @@ flowchart TD
     MJORD -->|"否 (迟到的旧 joined,<br/>如 left(E2) 先到已建墓碑)"| STALE["只补 joined_at(取较早值),<br/>不复活行、不改 last_event_id"]
     MJORD -->|是| R1{"事务: 该 (group, puid) 有行?"}
     R1 -->|"无"| I1["先查账号终态:<br/>terminal_at 非空 → INSERT 即带 left_at(墓碑,<br/>join 在途时账号已终态的乱序防线);<br/>为空 → INSERT 活跃行(role=member,<br/>account_id=反查所得);last_event_id=E"]
-    R1 -->|"有且 left_at 非空"| U1["复活: left_at=NULL<br/>(E 已大于离开事件 id,join 确在其后);<br/>last_event_id=E"]
+    R1 -->|"有且 left_at 非空"| U1["先查账号终态:<br/>terminal_at 非空 → STALE 处理(只补 joined_at,<br/>不复活——终态时从所有群成员表移除);<br/>为空 → 复活: left_at=NULL<br/>(E 已大于离开事件 id,join 确在其后);<br/>last_event_id=E"]
     R1 -->|"有且活跃"| N1["幂等跳过(仅更新 last_event_id=E)"]
     ML --> R2{"该 puid 是服务账号?"}
     R2 -->|"否 (外部成员)"| N2["无行不建,幂等跳过"]
     R2 -->|是| R3{"活跃行存在?"}
     R3 -->|是| U2["left_at=now(),<br/>last_event_id=E"]
-    R3 -->|否| TOMB["INSERT 墓碑行(left_at=now(),<br/>last_event_id=E)<br/>ON CONFLICT (group_id,platform_user_id)<br/>DO NOTHING(重复推送吸收)——<br/>不插墓碑则乱序先到的 left 会被<br/>随后的 joined 复活(D2-1)"]
+    R3 -->|否| TOMB["INSERT 墓碑行(left_at=now(),<br/>last_event_id=E)<br/>ON CONFLICT (group_id,platform_user_id) DO UPDATE<br/>SET last_event_id=GREATEST(last_event_id,EXCLUDED.last_event_id)<br/>(重复推送吸收+单调推进,同一事务——<br/>双 leave 循环下迟到 joined<br/>无法越过第二道防线)——<br/>不插墓碑则乱序先到的 left 会被<br/>随后的 joined 复活(D2-1)"]
     AST --> T1["enterTerminal(accountId)<br/>(§03 §4: 全群移除,原子副作用)"]
     TERM --> T1
     CRT --> I2["INSERT (role=creator) — 建群事务内"]

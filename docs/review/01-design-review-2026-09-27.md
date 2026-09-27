@@ -228,7 +228,8 @@ D1-1/D1-2/D1-3 都在「任意时刻重启」这条总则路径上——笔试�
 11. ☑ 新增 [design/14-gateway-service.md](../design/14-gateway-service.md)（G1，28 项开关映射表 + `/_test` 控制平面 + eventId 跨 reset 不复用）与 [design/15-web-console.md](../design/15-web-console.md)（G2，五页面 × 数据流 + WS 客户端 + 测试点）；
 12. ☑ 建 [server/VITEST_PLAN.md](../../server/VITEST_PLAN.md)（G4：I×S×gw-28×ag-19 → 用例映射 + 崩溃注入 4 点 + 审查修复项回归 10 条）；
 13. ☐ **用户裁决 C3（G5）**——建议做（≈1–2h 一条冒烟）；若不做，README 完成度表写明理由；
-14. ☐ 按 §3.3 作战图开工 P0（脚手架 + 迁移 + A0 + docker-compose）。
+14. ☐ 按 §3.3 作战图开工 P0（脚手架 + 迁移 + A0 + docker-compose）；
+15. ☑ R-A/R-B/R-C…R-G 复核残留修复（本轮）。
 
 附（本轮修订新增）：【解读】清单已汇总为 [design/README.md](../design/README.md)「契约解释声明」25 条；本报告 §2.3 各项的回归用例已列入 VITEST_PLAN §5。
 
