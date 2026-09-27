@@ -52,6 +52,8 @@ const _apiCodesExact: Record<ApiErrorCode, true> = {
   LEAVE_FAILED: true,
   GROUP_NOT_FOUND: true,
   GROUP_UNREACHABLE: true,
+  AGENT_RUN_NOT_FOUND: true, // 404（T-P4-13 设计值）
+  SEQUENCE_RUN_NOT_FOUND: true, // 404（T-P6-05 设计值）
   INTERNAL: true,
 };
 
@@ -104,9 +106,9 @@ describe('agent protocol error codes (QR §3, REQ §2.2)', () => {
 });
 
 describe('own API error codes (QR §4 + design values)', () => {
-  it('covers the full QR §4 table plus the 5 design values, nothing else', () => {
+  it('covers the full QR §4 table plus the 7 design values, nothing else', () => {
     expect([...API_ERROR_CODES].sort()).toEqual(Object.keys(_apiCodesExact).sort());
-    expect(API_ERROR_CODES).toHaveLength(18);
+    expect(API_ERROR_CODES).toHaveLength(20);
   });
 });
 
