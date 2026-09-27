@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { assertAccountOperationAllowed, type AccountGateError } from './accounts.js';
 import { attachMedia, isMediaMessageEnabled, requestOrigin } from './media.js';
 import { appendLedger, type GatewayState, type MockMessageRecord } from './state.js';
-import { activeSwitch, randomBetween, readBooleanParam, readNumberParam, type SwitchTarget } from './switches.js';
+import type { SwitchTarget } from './switches.js';
 import { resolveMessageSentDelayMs, resolveSendAcceptDelayMs } from './switches/basic.js';
 import {
   isByClientIdOutage,
@@ -18,12 +18,18 @@ import {
   UNAVAILABLE_BODY,
 } from './switches/outbound.js';
 import { isLeaveForced500 } from './switches/group-lifecycle.js';
+import {
+  isKickNoPermission,
+  isOwnerLeftOnKick,
+  kick504Config,
+  resolveKickConvergedKicked,
+  resolveKickDelayMs,
+} from './switches/kick.js';
 
 // —— 契约时序（QR §1 / REQ §2.1）；mock 自持（不依赖 server 的 constants.ts）——
 // send 202（gw-1）/ message_sent（gw-2）归 switches/basic.ts；504 后 1.5s 落地（gw-7）归 switches/outbound.ts。
 /** kick 响应可能 1–5s（REQ §2.1；QR §1） */
-const KICK_LATENCY_MIN_MS = 1000;
-const KICK_LATENCY_MAX_MS = 5000;
+
 
 function sendGateError(reply: { code: (s: number) => { send: (b: unknown) => unknown } }, gate: AccountGateError) {
   reply.code(gate.statusCode).send(gate.body);
@@ -172,30 +178,24 @@ export function registerMessagingRoutes(app: FastifyInstance, state: GatewayStat
 
     // 开关 25 强制注入（DES/14 §5）；自然语义：群主已退群 → 409；非群主且未被 promote → 403
     const kickTarget = { groupId, accountId: body.byAccountId };
-    if (activeSwitch(state, 'owner_left_on_kick', kickTarget) !== undefined || !group.members.has(group.creator)) {
+    if (isOwnerLeftOnKick(state, kickTarget) || !group.members.has(group.creator)) {
       return reply.code(409).send({ code: 'OWNER_LEFT', message: 'group owner has left' });
     }
     const isOwner = byAccount.platformUserId === group.creator;
     const isPromoted = group.promoted.has(byAccount.platformUserId);
-    if (
-      activeSwitch(state, 'kick_no_permission', kickTarget) !== undefined ||
-      (!isOwner && !isPromoted)
-    ) {
+    if (isKickNoPermission(state, kickTarget) || (!isOwner && !isPromoted)) {
       return reply.code(403).send({ code: 'NO_PERMISSION', message: 'kick requires owner or promoted admin' });
     }
 
     const targetPuid = body.targetPlatformUserId;
-    const timeoutConfig = activeSwitch(state, 'kick_504', kickTarget);
+    const timeoutConfig = kick504Config(state, kickTarget);
     // 响应延迟：kick_slow 钉值 / kick_504 自带钉值（504 也可能慢回）/ 契约区间随机
-    const delay =
-      readNumberParam(activeSwitch(state, 'kick_slow', kickTarget), 'delayMs') ??
-      readNumberParam(timeoutConfig, 'delayMs') ??
-      randomBetween(KICK_LATENCY_MIN_MS, KICK_LATENCY_MAX_MS);
+    const delay = resolveKickDelayMs(state, kickTarget, timeoutConfig);
     // 响应在延迟后发出（契约 1–5s）：await 占住请求；成员移除发生在 200 返回之前
     await waitMs(delay);
     const liveGroup = state.groups.get(groupId); // 落定时刻重查（reset/删除后不写陈旧对象）
     // 504 分支：结果未知，但成员列表 2s 内收敛到真值（kicked 独立可配，DES/14 §3）
-    const kicked = timeoutConfig === undefined ? true : readBooleanParam(timeoutConfig, 'kicked', true);
+    const kicked = resolveKickConvergedKicked(timeoutConfig);
     const removed = liveGroup !== undefined && kicked && liveGroup.members.delete(targetPuid);
     if (timeoutConfig !== undefined) {
       reply.code(504).send({ code: 'NETWORK_TIMEOUT', message: 'kick result unknown' });
