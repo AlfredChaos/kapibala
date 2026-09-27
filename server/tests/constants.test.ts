@@ -65,6 +65,8 @@ const DESIGN_TABLE: ReadonlyArray<readonly [keyof typeof C, number | boolean]> =
   ['TEXT_MAX_LENGTH', 2000], // DES/05 §2.1.1（D3-6 / 声明 #15）
   ['AGENT_RUN_LIST_LIMIT', 20], // README 解释声明 #22
   ['TRIGGER_SWEEP_INTERVAL_MS', 5000], // DES/06 §2
+  ['REFRESH_TOKEN_TTL_MS', 604800000], // DES/02 §2.3 / 声明 #23（7d）
+  ['PENDING_EVENT_RETENTION_DAYS', 7], // DES/02 §1.4（done 行保留 7 天）
 ];
 
 describe('I14 · QR §1 契约数字逐字断言', () => {
@@ -82,8 +84,8 @@ describe('设计值常量逐个断言（【设计值】+ 出处）', () => {
     expect(C[key]).toBe(value);
   });
 
-  it('常量总数守恒：29 契约 + 25 设计 = 54，禁止静默增删', () => {
-    expect(Object.keys(C)).toHaveLength(54);
-    expect(DESIGN_TABLE).toHaveLength(25);
+  it('常量总数守恒：29 契约 + 27 设计 = 56，禁止静默增删', () => {
+    expect(Object.keys(C)).toHaveLength(56);
+    expect(DESIGN_TABLE).toHaveLength(27);
   });
 });

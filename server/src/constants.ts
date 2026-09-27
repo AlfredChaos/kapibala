@@ -57,6 +57,9 @@ export const SEND_MESSAGE_WAIT_MS = 5000;
 /** access token 有效期 15min（QR §1） */
 export const ACCESS_TOKEN_TTL_MS = 900000;
 
+/** refresh token 有效期 7 天（题目未规定）【设计值】（DES/02 §2.3 / README 解释声明 #23） */
+export const REFRESH_TOKEN_TTL_MS = 604800000;
+
 // ============================================================================
 // 四、Agent 预算与协议（QR §1，A5 / REQ §2.2）
 // ============================================================================
@@ -94,6 +97,7 @@ export const RAW_RESPONSE_MAX_BYTES = 2048;
 // ============================================================================
 // 五、前端 / 时间线 / 媒体（QR §1）
 // ============================================================================
+
 
 /** 前端重连后事件补齐时限 3s（QR §1，B4） */
 export const WS_BACKFILL_MS = 3000;
@@ -141,6 +145,9 @@ export const DEADLETTER_BACKOFF_MAX_MS = 300000;
 
 /** 死信累计失败阈值 20 次 → inconsistency(dead_letter_stuck)【设计值】（DES/08 §1.4） */
 export const DEADLETTER_STUCK_THRESHOLD = 20;
+
+/** 死信 pending_event 已完成行（status='done'）的审计保留 7 天，调度器定期清理【设计值】（DES/02 §1.4） */
+export const PENDING_EVENT_RETENTION_DAYS = 7;
 
 // ============================================================================
 // 八、消息发送 unknown 探测 / 文本约束（【设计值】DES/05 §2.1.1 / §2.4）
