@@ -257,6 +257,14 @@
 - 踩坑：**StrictMode 双 effect 让「按调用序号切假响应」的 fetch 桩失效**（首次 mount 会连拉两次详情，第二条响应被提前消费）→ 响应体改由可变变量控制，调用计数只用于「是否重拉」断言（baseCalls 差值）；WS 终态/他 run 帧断言都用差值不变性。
 - VITEST 登记：B4-2 应勾（00-SPEC.md 已登记）。
 
+
+## 2026-09-28 T-P6-07 页面 5：序列（定义/启动/预检弹窗/运行视图）
+- 做了什么：`components/SequenceForm.tsx`（steps 编辑行 index/accountRole/text/delaySeconds + 增删行；`validateSequenceDraft` 与 server define.ts 同构——index 正整数唯一、accountRole∈{admin,member}、text 1..TEXT_MAX_LENGTH、delaySeconds 非负整数，先于 POST 拦截）+ `components/PreflightModal.tsx`（run steps 的 resolvedVars/varSources 逐步表格：key/值/来源 default|step:<i>）+ `pages/SequencesPage.tsx`（三块：定义表单 + 本地序列列表——后端无 GET /api/sequences（QR §1 逐字）本地登记；启动表单选群/选序列/vars+stepVars JSON；422 UNRESOLVED_PLACEHOLDER → stepIndex/key 展示 + 启动表单选中序列的对应步骤行红框高亮 + 行内 ⚠{key} 标记；201 → GET run → 预检弹窗 + 运行视图；运行视图 status/currentStepIndex + 每步 status/scheduledAt/sentAt，WS sequence_run 帧 → 头部推进+重拉详情拿步级 sentAt）+ `api-types.ts`（SequenceStepDef/SequenceStepView/SequenceRunView）+ `api/client.ts`（ApiError.extra 透出——envelope 把 AppError.extra 并入 error，422 的 stepIndex/key 经此到达前端）+ router /sequences。
+- 验证命令与输出摘录：`npx vitest run tests/sequences-page.test.tsx` → **5/5**：本地校验拦空 text（0 POST）；合法定义 POST+本地登记；422→`步骤 2 的占位符 {code} 未解析` banner+`launch-step-2` 行内 ⚠{code} 标记（step-1 行不高亮）；201→弹窗逐步渲染 nick=Alice@default、code=42@step:2+关闭；运行视图静态字段+WS sequence_run→currentStepIndex 1→2 + 重拉拿到 step-2 sentAt。全量 52/52；tsc/eslint/build 全绿。
+- 偏差与【解读】：① 「预检成功弹窗供确认后提交」无对应后端预检端点（start 的预检与 INSERT 同事务不可分；QR §1 无 precheck 路由）→ 落地为 201 后立即 GET run 展示快照弹窗（数据正是「复用该 run steps 的 resolvedVars/varSources 逐步展示」逐字），422 路径照旧；② 「定义列表」无 GET /api/sequences → 本会话本地登记（session 范围）；③ 422 高亮落在**启动表单选中序列的步骤行**（定义编辑器提交后已重置单步，高亮打空）+ 编辑器行也保留高亮接线（编辑中 422 仍打行）；④ WS 帧 payload 无步级字段 → 头部就地更新+重拉详情（同 agent_run 模式）。
+- 踩坑：① happy-dom/React 受控元素：直接 el.value=+change 无效——必须 native prototype setter + input 事件（textarea/input）/change（select）；② ApiError 原先丢 extra（envelope 合并业务字段但 client 只取 code/message）→ 透出 `extra`；③ happy-dom 不行内解析 `border` shorthand 到 borderColor/cssText——行内高亮断言改用语义标记（launch-hit-<i> 在行内）而非 style 文本；④ StrictMode 双 effect 多拉详情→重拉断言用差值；⑤ 测试禁 non-null `!`——`must()`/`el()` helper + querySelector 泛型写在内侧。
+- VITEST 登记：B1（页面半边）应勾（00-SPEC.md 已登记）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

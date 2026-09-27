@@ -64,3 +64,32 @@ export interface AgentRunStepView {
 export interface AgentRunDetailView extends AgentRunView {
   readonly steps: AgentRunStepView[];
 }
+
+/** 序列定义步（DES/07 §1、server modules/sequences/define.ts SequenceStepDef 逐字） */
+export interface SequenceStepDef {
+  readonly index: number;
+  readonly accountRole: 'admin' | 'member';
+  readonly text: string;
+  readonly delaySeconds: number;
+}
+
+/** GET /api/sequence-runs/:id 步视图（server query.ts SequenceStepView 逐字） */
+export interface SequenceStepView {
+  readonly index: number;
+  readonly status: string;
+  readonly scheduledAt: string | null;
+  readonly sentAt: string | null;
+  readonly clientMsgId: string | null;
+  readonly resolvedVars: Record<string, string>;
+  readonly varSources: Record<string, string>;
+}
+
+export interface SequenceRunView {
+  readonly id: string;
+  readonly groupId: string;
+  readonly status: string;
+  readonly currentStepIndex: number;
+  readonly createdAt: string;
+  readonly endedAt: string | null;
+  readonly steps: SequenceStepView[];
+}

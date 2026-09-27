@@ -836,7 +836,7 @@
   d) 2KB 截断由后端保证，前端直接渲染；无 any
   e) 矩阵 B4-2 登记应勾
 
-### T-P6-07 页面 5：序列（定义/启动/预检弹窗/运行视图）            [status: TODO]
+### T-P6-07 页面 5：序列（定义/启动/预检弹窗/运行视图）            [status: DONE]
 - goal: `/sequences` 页：定义表单（steps 编辑 + 校验同 DES/07 §1）、启动表单（选群 + vars/stepVars JSON）、预检失败 422 展示（stepIndex/key 高亮）、预检成功弹窗（复用 resolvedVars/varSources 逐步展示）、运行视图（status/scheduledAt/sentAt/currentStepIndex 跟随 WS）。
 - refs: DES/15-web-console.md §2 页面 5；DES/07-sequence-module.md §1/§2/§6；REQ §4 页面 5
 - owned: web/src/pages/SequencesPage.tsx、web/src/components/SequenceForm.tsx、web/src/components/PreflightModal.tsx、web/tests/sequences-page.test.tsx

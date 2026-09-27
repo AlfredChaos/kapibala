@@ -7,6 +7,7 @@ import { LoginPage } from './pages/LoginPage.js';
 import { AccountsPage } from './pages/AccountsPage.js';
 import { GroupDetailPage } from './pages/GroupDetailPage.js';
 import { AgentRunPage } from './pages/AgentRunPage.js';
+import { SequencesPage } from './pages/SequencesPage.js';
 
 /** 路由守卫：无会话 → /login（replace 防历史栈污染）。导出供守卫行为测试直挂 */
 export function RequireAuth(): JSX.Element {
@@ -24,6 +25,7 @@ const router = createBrowserRouter([
       { path: '/accounts', element: <AccountsPage /> },
       { path: '/groups/:id', element: <GroupDetailPage /> },
       { path: '/agent-runs/:id', element: <AgentRunPage /> },
+      { path: '/sequences', element: <SequencesPage /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

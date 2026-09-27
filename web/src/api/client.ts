@@ -15,6 +15,8 @@ export interface ApiError {
   readonly status: number;
   readonly code: string;
   readonly message: string;
+  /** 业务附带字段原样透出（envelope 把 AppError.extra 并入 error：UNRESOLVED_PLACEHOLDER 的 stepIndex/key 等） */
+  readonly extra?: Record<string, unknown>;
 }
 
 export function isApiError(err: unknown): err is ApiError {
@@ -54,10 +56,17 @@ function toApiError(status: number, body: unknown): ApiError {
     typeof (body as { error?: { code?: unknown } }).error?.code === 'string'
   ) {
     const err = (body as { error: { code: string; message?: unknown } }).error;
+    // extra = error 上 code/message/requestId 以外的字段（AppError.extra 已并入）
+    const raw = (body as { error: Record<string, unknown> }).error;
+    const extra: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (k !== 'code' && k !== 'message' && k !== 'requestId') extra[k] = v;
+    }
     return {
       status,
       code: err.code,
       message: typeof err.message === 'string' ? err.message : String(status),
+      ...(Object.keys(extra).length > 0 ? { extra } : {}),
     };
   }
   return { status, code: `HTTP_${status}`, message: `request failed with status ${status}` };
