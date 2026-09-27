@@ -24,7 +24,7 @@
 | I10 | agent run 恢复同 runId；已产生效果的工具不重放不记失败 | `tests/agent/crash-recovery.test.ts`（四个崩溃点 ×2/③） | ☐ |
 | I11 | 序列重启只重排最早过期步骤 | `tests/sequences/restart-reschedule.test.ts`（崩溃点 ④） | ☐ |
 | I12 | WS seq 单调；sinceSeq 补发不重复；断线 3s 补齐 | `tests/ws/sinceseq.test.ts` | ☐ |
-| I13 | refresh 复用整会话作废；logout 后 access 即失效 | `tests/auth/session.test.ts` | ☐ |
+| I13 | refresh 复用整会话作废；logout 后 access 即失效 | `tests/auth/session.test.ts` | ☑ |
 | I14 | 契约时序数字不取整 | 常量集中定义 + `tests/constants.test.ts`（对照速查表逐个断言值） | ☑ |
 
 ## 2. 场景 S1–S8 → 编排与用例
@@ -103,3 +103,23 @@
 - [ ] ag-1–19（19 项开关各有代表用例）
 - [ ] 崩溃注入 4 点
 - [ ] 审查回归 11 项
+
+### 6.1 阶段门 P0 验收明细（00-SPEC §5 编号；勾选 = 用例已落地且任务审查通过）
+
+> 卡面 e 项引用的矩阵编号（A0-x/A-xx/B3-x/G-21）在本表集中登记勾选——00-SPEC §5 表按设计不带状态列（其表头注明勾选与 VITEST_PLAN 同步维护）。
+
+> 覆盖提交：A0-1/A0-2/A-02/A-20/A-21 → `a937f9c`（T-P0-04）；G-21 → `741d249`（T-P0-06）；A-01/A0-3/B3-1/2/3 → `04ea50c`（T-P0-07）。
+
+| 编号 | 摘要 | 用例 | 状态 |
+|---|---|---|---|
+| A0-1 | 迁移可重复/落后拒启 | `tests/migration.test.ts` | ☑ |
+| A0-2 | 错误响应格式 | `tests/health.test.ts` | ☑ |
+| A-02 | health → {ok, schemaVersion} | `tests/health.test.ts` | ☑ |
+| A-20 | 字段约定/错误体 | `tests/health.test.ts` + 各域 | ☑ |
+| A-21 | 环境变量 | `tests/migration.test.ts` + C2 演示（C2 演示部分待 P8） | ☑ |
+| G-21 | seed 预置 idle/null | `tests/seed.test.ts` | ☑ |
+| A-01 | login → accessToken；admin/viewer；15min | `tests/auth/session.test.ts` | ☑ |
+| A0-3 | viewer 403 | `tests/auth/session.test.ts` | ☑ |
+| B3-1 | refresh HttpOnly cookie | `tests/auth/session.test.ts` | ☑ |
+| B3-2 | 复用作废整会话 | `tests/auth/session.test.ts` | ☑ |
+| B3-3 | logout 即失效 | `tests/auth/session.test.ts` | ☑ |

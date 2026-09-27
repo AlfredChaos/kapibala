@@ -65,6 +65,42 @@
 - 偏差与【解读】：审查指出漏 `REFRESH_TOKEN_TTL_MS` 与 pending-event 保留常量——follow-up 曾挂 impl-a 待收口，**簿记时已落地**：`b204dfd`（refresh TTL + 死信/待定事件保留常量补齐）。
 - 踩坑：无。
 
+## 2026-09-27 T-P0-04 db 基建 + 迁移 runner + 版本门 + /api/health
+- 做了什么：impl-b 落地 `server/src/db/`（pool / tx / pages / migrate / ensure-schema）与 HTTP 骨架（app、request-id/errors/auth-guard 插件、health 路由）、启动版本门接线。commit `a937f9c`（18 files +956/−10）。
+- 验证命令与输出摘录：审查者 **PASS**——版本门 **live 双向验证**（迁移落后与 schema 超前两方向均实测拒启）；schema 门附**变异探针**（故意破坏 → 变红，验证后已还原）；`tests/migration.test.ts` + `tests/health.test.ts` 全绿；VITEST_PLAN §6.1 的 A0-1/A0-2/A-02/A-20/A-21 登记勾选。
+- 偏差与【解读】：无。
+- 踩坑：无。
+
+## 2026-09-27 T-P0-06 seed：admin/viewer + acc-01..04
+- 做了什么：幂等 seed 落地——`server/src/db/seed.ts`（users admin/viewer + accounts acc-01..04）。commit `741d249`（4 files +162）。
+- 验证命令与输出摘录：审查者 **PASS**；`tests/seed.test.ts` 覆盖幂等与 G-21 预置（账号 idle、对应字段 NULL）；VITEST_PLAN §6.1 的 G-21 登记勾选。
+- 偏差与【解读】：无。
+- 踩坑：无。
+
+## 2026-09-27 T-P0-07 认证与会话（B3 后端全量 + viewer 403）
+- 做了什么：auth 模块与路由落地——`server/src/modules/auth/`（service / tokens）+ `routes/auth.ts`（login/refresh/logout）+ viewer 角色门。commit `04ea50c`（6 files +557/−2）。
+- 验证命令与输出摘录：审查者 **PASS**——含 **live B3 链验证**（login → refresh HttpOnly cookie → 复用作废整会话 → logout 即失效，真实端点链路走通）；`tests/auth/session.test.ts` 全绿；VITEST_PLAN §1 I13 勾选，§6.1 的 A-01/A0-3/B3-1/2/3 登记勾选。**至此 P0 阶段门达成（7/7）**。
+- 偏差与【解读】：无。
+- 踩坑：无。
+
+## 2026-09-27 T-P1-01 mock-gateway 骨架 + 账号域 + /_test 控制平面
+- 做了什么：impl-a 落地 mock-gateway 包骨架（app / index / state）、账号域（`accounts.ts`）与 `/_test` 控制平面（`test-plane.ts`）。commit `e5099d3`（6 files +769/−5）。
+- 验证命令与输出摘录：审查者 **PASS**；两条 minor（`/_test` 入参守卫）随修复提交 `2fb533e` 落地；`mock-gateway/tests/accounts.test.ts` 全绿。
+- 偏差与【解读】：minor 均为入参守卫收紧，无接口语义变化。
+- 踩坑：无。
+
+## 2026-09-27 T-P1-02 事件账本与 SSE 推送器
+- 做了什么：`mock-gateway/src/ledger.ts`（事件账本）+ `sse.ts`（SSE 推送器）落地，接线 app/state。commit `6374ed3`（5 files +379）。
+- 验证命令与输出摘录：审查者 **PASS**；`mock-gateway/tests/sse.test.ts` 全绿。
+- 偏差与【解读】：审查一条 advisory——`decorateFrame` 缝偏窄，容纳不了乱序/补投类开关（gw-4/5）；不单开修复，随 **T-P1-05** 扩缝处理。
+- 踩坑：无。
+
+## 2026-09-27 T-P1-03 群生命周期端点（create/invite/join/promote）
+- 做了什么：`mock-gateway/src/groups.ts` 群域落地（create/invite/join/promote 端点），接线 app。commit `90d66fa`（4 files +486）。
+- 验证命令与输出摘录：`mock-gateway/tests/groups.test.ts` 全绿。簿记时点审查**进行中**——编排者按协议先记 DONE（02-TASKS 已翻），若审查拒绝再重开。
+- 偏差与【解读】：派发卡文案曾出现契约中不存在的字段/开关名（编排层漂移）；实现以契约为准，**按 REQ §2.1 正确**，未带入代码。
+- 踩坑：无。
+
 ---
 
 <!-- 后续任务条目按上述格式在此追加。示例：

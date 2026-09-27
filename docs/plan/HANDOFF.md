@@ -18,17 +18,26 @@
 - [x] **T-P0-02 共享契约类型包 DONE**（bbcb69d；审查 PASS + 变异探针证据；vitest 基建 follow-up `17bfca7`、ws-events 注释补引 design/08 §2.3 随簿记提交落地）。
 - [x] **T-P0-03 全量数据库迁移 DONE**（851c11f；001–008 共 20 表；审查 PASS——174 列/21 CHECK/9 唯一/18 FK 穷举保真审计 + 14 行为探针全过）。
 - [x] **T-P0-05 契约常量 + I14 DONE**（e1e702f；54 常量 + 56 断言含变异抽查，VITEST_PLAN I14 已勾；REFRESH_TOKEN_TTL/pending-event 保留常量 follow-up 已由 `b204dfd` 收口）。
+- [x] **T-P0-04 db 基建 + 迁移 runner + 版本门 + /api/health DONE**（a937f9c，18 files +956/−10；审查 PASS——版本门 live 双向验证 + schema 门变异探针（验证后还原））。
+- [x] **T-P0-06 seed DONE**（741d249；审查 PASS；幂等 seed + G-21 预置）。
+- [x] **T-P0-07 auth B3 DONE**（04ea50c；审查 PASS + live B3 链验证；I13 / A-01 / A0-3 / B3-1/2/3 登记勾选）。
+- [x] **P0 阶段门达成（7/7 全 DONE）**；矩阵外验收编号（A0-1/2/3、A-01/02/20/21、G-21、B3-1/2/3）集中登记于 `server/VITEST_PLAN.md` §6.1。
+- [x] **T-P1-01 mock-gateway 骨架 + 账号域 + /_test 控制平面 DONE**（e5099d3 + 审查修复 2fb533e（2 minor 入参守卫）；审查 PASS）。
+- [x] **T-P1-02 事件账本与 SSE 推送器 DONE**（6374ed3；审查 PASS；advisory：decorateFrame 缝对乱序/补投过窄 → T-P1-05 扩缝）。
+- [x] **T-P1-03 群生命周期端点 DONE**（90d66fa；簿记时点审查进行中——编排者决定先记 DONE，审查拒绝则重开；备注：派发卡曾出现非契约字段/开关名，实现按 REQ §2.1 正确）。
 
 ## 进行中
 
-- T-P0-04 db 基建 + 迁移 runner + 版本门 + /api/health — impl-b 执行中。
-- T-P1-01 mock-gateway 骨架 + 账号域 + /_test 控制平面 — impl-a 执行中（含 T-P0-05 常量 follow-up 已并入 b204dfd）。
+- T-P1-04 send/kick/leave/members/by-client-id — **已提交（0c77efa），审查进行中**。
+- T-P1-05 S1/S2 驱动开关（gw-1/2/3）与 counters 断言 — 新 worker 实施中（含 T-P1-02 的 decorateFrame 扩缝）。
+- T-P2-01 server 网关 client（gateway/） — 新 worker 实施中。
+- 下一批派发（按 DAG）：T-P2-02（调度器/恢复器骨架 + 启动时序）、T-P2-03（SSE 消费循环 + 连续前缀游标）。
 
 ## 剩余（按 DAG 顺序，详见 02-TASKS.md）
 
-- P0 余下：T-P0-04（进行中）→ T-P0-06 seed → T-P0-07 auth(B3)；随后 P1–P8 按 DAG 顺序执行。
-- P1（5，T-P1-01 进行中）：mock-gateway 核心 + gw-1/2/3。
-- P2（12）：SSE/死信/账号状态机/入站/成员投影/WS/时间线 + gw-4/5/19/28。
+- P0：**已完成（7/7）**。
+- P1（余 2）：T-P1-04（待审查）、T-P1-05（进行中）。
+- P2（12；T-P2-01 进行中，下一批派发 T-P2-02/03）：SSE/死信/账号状态机/入站/成员投影/WS/时间线 + gw-4/5/19/28。
 - P3（11）：出站全链/建群/leave-all + S1–S4 集成（接口面冻结点）。
 - P4（15）：mock-agent + A5 全量 + S5/S6。
 - P5（5）：web 页面 1–3 + 401 单飞。
@@ -50,8 +59,8 @@
 ## 验证状态快照（最近一次）
 
 - 全仓 lint / typecheck / test / build：**绿**（T-P0-01 `e3d1b5d` 时点全绿；收口提交复验 `pnpm typecheck` 0 错、`pnpm build` 全 Done）。
-- 阶段门：P0–P8 全部未达。
-- VITEST_PLAN 勾选：0/全量（预期；勾选发生在各阶段门）。
+- 阶段门：**P0 已达（7/7）**；P1–P8 未达。
+- VITEST_PLAN 勾选：§1 I13/I14 + §6.1 P0 验收 11 项已登记；其余按各阶段门勾选。
 - 计划评审门：**已通过**（两审查 PASS + F1–F11 修复落地 + 脚本复查）。
 
 > 终态目标行（达成后填写）：「DoD 达成，待人类 push/交付」。

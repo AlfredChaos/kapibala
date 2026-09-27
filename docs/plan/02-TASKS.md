@@ -58,7 +58,7 @@
   d) 只创建不修改；版本号 1..N 连续无空洞；不使用 enum 类型（状态列 text + CHECK，DES/02 约定）
   e) 无 VITEST 行（A0-1 的行为测试归 T-P0-04）
 
-### T-P0-04 db 基建 + 迁移 runner + 版本门 + /api/health            [status: TODO]
+### T-P0-04 db 基建 + 迁移 runner + 版本门 + /api/health            [status: DONE]
 - goal: pg Pool 与事务助手、自研迁移 runner（事务内「执行+记版本」）、启动版本门（落后/超前均拒绝）、Fastify 骨架（requestId/统一错误映射/auth guard 挂点）、`GET /api/health`、测试库隔离基建（模板库+随机后缀）。
 - refs: DES/01-architecture.md §6.2–§6.4、§7；DES/02-data-model.md §1.1/§10；REQ §2.3（health 行）；AGENTS.md §3-1/§3-7
 - owned: server/src/db/**（pool.ts、tx.ts、migrate.ts、pages.ts）、server/src/config/**、server/src/http/**（app.ts、plugins/request-id.ts、plugins/errors.ts、plugins/auth-guard.ts、routes/index.ts）、server/src/index.ts、server/tests/helpers/db.ts、server/tests/migration.test.ts、server/tests/health.test.ts
@@ -84,7 +84,7 @@
   d) 禁止取整（如 5s→6000）；每常量带出处注释；此后任何任务不得新增无出处魔数（各卡 d 项统一引用本条）
   e) VITEST 行 I14 登记应勾
 
-### T-P0-06 seed：admin/viewer + acc-01..04            [status: TODO]
+### T-P0-06 seed：admin/viewer + acc-01..04            [status: DONE]
 - goal: 幂等 seed（ON CONFLICT DO NOTHING）：`app_user` 两用户（admin/admin、viewer/viewer，bcrypt cost 10）+ `account` 四账号（acc-01..acc-04，`status='idle'`、`platform_user_id=NULL`）。
 - refs: DES/02-data-model.md §10、§2.1/§3.1；REQ §2.1（预置账号行）；DES/09-auth-module.md §5
 - owned: server/src/db/seed.ts、server/tests/seed.test.ts
@@ -97,7 +97,7 @@
   d) 幂等不靠先查后插（用 ON CONFLICT）；不打印明文密码
   e) VITEST 行 G-21 登记应勾；根 AGENTS.md db:seed 命令**只读核对**（同 T-P0-04 e 项限定：偏差登记、不直接改）
 
-### T-P0-07 认证与会话（B3 后端全量 + viewer 403）            [status: TODO]
+### T-P0-07 认证与会话（B3 后端全量 + viewer 403）            [status: DONE]
 - goal: opaque token（256bit、SHA-256 落库）+ login/refresh/logout 三端点 + refresh 轮换链 + 复用检测作废整会话 + logout 即时失效 + auth guard 权限矩阵。
 - refs: DES/09-auth-module.md 全文；REQ §2.3 auth 行、§3 B3、A0；QR §4
 - owned: server/src/modules/auth/**、server/src/http/routes/auth.ts（+routes/index.ts 注册行）、server/tests/auth/session.test.ts
@@ -114,7 +114,7 @@
 
 # P1 · mock-gateway 核心（5 任务，lane-B）
 
-### T-P1-01 mock-gateway 骨架 + 账号域 + /_test 控制平面            [status: TODO]
+### T-P1-01 mock-gateway 骨架 + 账号域 + /_test 控制平面            [status: DONE]
 - goal: mock-gateway 包可起：Fastify 应用 + 内存状态模型 + 账号域端点（connect/disconnect 幂等、offline/终态错误）+ `/_test` 控制平面骨架（scenario/clear/reset/counters/emit）。
 - refs: DES/14-gateway-service.md §1–§2、§4、§6；REQ §2.1 账号节；QR §2
 - owned: mock-gateway/src/app.ts、mock-gateway/src/state.ts、mock-gateway/src/accounts.ts、mock-gateway/src/test-plane.ts、mock-gateway/src/index.ts、mock-gateway/tests/accounts.test.ts
@@ -127,7 +127,7 @@
   d) 开关/端点命名与 DES/14 §4 逐字一致，不自创契约；`GATEWAY_SEED_ACCOUNTS` 默认 `acc-01,acc-02,acc-03,acc-04`；无 any
   e) mock-gateway 包内 AGENTS.md 命令**只读核对**（不改根 AGENTS.md；包内文件如需修改，登记偏差由 T-P8-04 统一改，或回本泳道 owning 任务 T-P1-01 串行处理——其余 lane-B 任务不直接改它）；无 VITEST 行（开关用例随阶段汇入）
 
-### T-P1-02 事件账本与 SSE 推送器            [status: TODO]
+### T-P1-02 事件账本与 SSE 推送器            [status: DONE]
 - goal: append-only 事件账本（eventId 单调分配）+ `GET /events?since=`（独占语义、全历史回放、不带 since 从当前时刻开始）+ SSE 帧格式 `id/event/data`（data 内带 eventId 与 type）。
 - refs: DES/14-gateway-service.md §1、§3；REQ §2.1 事件流节；QR §1（乱序窗口行）
 - owned: mock-gateway/src/ledger.ts、mock-gateway/src/sse.ts、mock-gateway/tests/sse.test.ts
@@ -140,7 +140,7 @@
   d) 每条推送先入账本再投帧；无静默丢帧；无 any
   e) 无 VITEST 行（server 侧消费在 T-P2-03 联测）
 
-### T-P1-03 群生命周期端点（create/invite/join/promote）            [status: TODO]
+### T-P1-03 群生命周期端点（create/invite/join/promote）            [status: DONE]
 - goal: `POST /groups`（创建者即成员、不推 member_joined）、`POST /groups/:id/invite`（readyAfterMs 0 或数秒、链接可过期）、`POST /groups/:id/join`（202 受理 + member_joined 100–1500ms 或永不到）、`POST /groups/:id/promote`（群主校验/NOT_MEMBER_YET/不推事件）。
 - refs: DES/14-gateway-service.md §2–§3；REQ §2.1 群与成员节；QR §1（100–1500ms 行）
 - owned: mock-gateway/src/groups.ts、mock-gateway/tests/groups.test.ts
