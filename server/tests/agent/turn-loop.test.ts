@@ -7,7 +7,7 @@ import { getTestDb, type TestDbHandle } from '../helpers/db.js';
 import { seed } from '../../src/db/seed.js';
 import { createAgentExecutor, type ToolOutcome } from '../../src/modules/agent/executor.js';
 import { AGENT_TOOLS } from '../../src/modules/agent/tools-def.js';
-import type { AgentClient, AgentTurnRequest, AgentTurnResponse } from '../../src/agentclient/index.js';
+import type { AgentClient, AgentRawResponse, AgentTurnRequest, AgentTurnResponse } from '../../src/agentclient/index.js';
 import { AgentClientError } from '../../src/agentclient/index.js';
 
 const silent = { info() {}, warn() {}, error() {} };
@@ -20,17 +20,15 @@ class FakeAgentClient implements AgentClient {
     this.script.push(fn);
   }
 
-  async callTurn(req: AgentTurnRequest): Promise<AgentTurnResponse> {
+  /** 传输层形态：{status, raw}——校验归 server validation.ts（T-P4-06 唯一收口） */
+  async rawTurn(req: AgentTurnRequest): Promise<AgentRawResponse> {
     this.calls.push(req);
     const next = this.script.shift();
-    if (next === undefined) {
-      // 默认剧本：finish
-      return {
-        stopReason: 'tool_use',
-        block: { type: 'tool_use', id: `tu_${this.calls.length}`, name: 'finish', input: { summary: 'done' } },
-      };
-    }
-    return next(req);
+    const resp: AgentTurnResponse = next === undefined
+      ? { stopReason: 'tool_use', block: { type: 'tool_use', id: `tu_${this.calls.length}`, name: 'finish', input: { summary: 'done' } } }
+      : await next(req);
+    // 契约线上形状：stop_reason + content:[block]
+    return { status: 200, raw: JSON.stringify({ stop_reason: resp.stopReason, content: [resp.block] }) };
   }
   async callAudit(): Promise<{ verdict: 'pass' | 'fail' | 'unresolved' }> {
     return { verdict: 'pass' };

@@ -25,12 +25,19 @@ import {
 import { tx } from '../../db/tx.js';
 import type { AgentClient, AgentMessage, AgentTurnRequest, AgentTurnResponse } from '../../agentclient/index.js';
 import { AgentClientError } from '../../agentclient/index.js';
+import type { AgentRawResponse } from '../../agentclient/index.js';
 import { checkBudget } from './budget.js';
 import { endAgentRun } from './end-run.js';
 import { AGENT_TOOLS, AGENT_TOOL_NAMES } from './tools-def.js';
+import { validateTurnResponse, validateToolInput } from './validation.js';
+import {
+  appendToolErrorResult,
+  clipRawResponse,
+  recordProtocolErrorStep,
+} from './protocol-errors.js';
 import { startAgentRun } from './trigger.js';
 
-const RAW_RESPONSE_MAX_BYTES = 2048; // raw_response 落库截断 2KB（REQ §2.2/DES/06 §11）
+
 
 export interface ExecutorLogger {
   info(obj: unknown, msg?: string): void;
@@ -91,13 +98,6 @@ interface RunRow {
 interface StepRow {
   readonly seq: number;
   readonly appended_blocks: unknown;
-}
-
-function clipRaw(raw: string | undefined): string | null {
-  if (raw === undefined) return null;
-  return Buffer.byteLength(raw, 'utf8') <= RAW_RESPONSE_MAX_BYTES
-    ? raw
-    : Buffer.from(raw, 'utf8').subarray(0, RAW_RESPONSE_MAX_BYTES).toString('utf8');
 }
 
 /** 会话历史：messages[0]=trigger_context JSON 串 + 各 step appended_blocks 按 seq 顺序拼接（§6 逐字） */
@@ -217,40 +217,6 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
     });
   }
 
-  /** 协议错误路径 B：不追加 assistant 块，只追加 user text「PROTOCOL_ERROR <code>: …」 */
-  async function recordProtocolError(
-    runId: string,
-    seq: number,
-    code: string,
-    rawResponse: string | null,
-    stepCounted: boolean,
-  ): Promise<{ streakHit: boolean }> {
-    return tx(deps.pool, async (client) => {
-      const { rowCount } = await client.query(
-        `UPDATE agent_run_step SET kind='protocol_error', status='done', error_code=$3,
-                raw_response=$4, appended_blocks=$5::jsonb, updated_at=now()
-         WHERE run_id=$1 AND seq=$2 AND status IN ('turn_dispatched','turn_received')`,
-        [
-          runId,
-          seq,
-          code,
-          rawResponse,
-          JSON.stringify([{ role: 'user', content: [{ type: 'text', text: `PROTOCOL_ERROR ${code}: agent response rejected` }] }]),
-        ],
-      );
-      if (rowCount !== 1) return { streakHit: false }; // 晚到/重复写回丢弃
-      // 协议错误步同样计步（A5-2「一步=一次往返无论返回什么」）；
-      // turn_received 已计步的路径（如 DUPLICATE_TOOL_USE_ID）不再重复加
-      const { rows } = await client.query<{ streak: number }>(
-        `UPDATE agent_run SET protocol_error_streak=protocol_error_streak+1,
-                step_count=step_count+$2::int, updated_at=now()
-         WHERE id=$1 RETURNING protocol_error_streak AS streak`,
-        [runId, stepCounted ? 0 : 1],
-      );
-      return { streakHit: (rows[0]?.streak ?? 0) >= 3 };
-    });
-  }
-
   async function turnLoop(runId: string): Promise<void> {
     for (;;) {
       const pre = await precheck(runId);
@@ -273,23 +239,44 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         ),
       );
 
-      // 步 2：HTTP（agentclient 内 AbortController 到时取消 → TURN_TIMEOUT）
-      let turn: AgentTurnResponse | undefined;
-      let rawBody: string | null = null;
-      let errCode: string | null = null;
+      // 步 2：HTTP（agentclient 传输层 AbortController 到时取消 → TURN_TIMEOUT）
+      let rawRes: AgentRawResponse | undefined;
+      let errCode: 'BAD_JSON' | 'TURN_TIMEOUT' | null = null;
+      let errRaw: string | null = null;
       try {
-        turn = await deps.agentClient.callTurn(request);
+        rawRes = await deps.agentClient.rawTurn(request);
       } catch (err) {
         if (err instanceof AgentClientError) {
           errCode = err.protocolErrorCode;
-          rawBody = err.rawBody !== undefined ? clipRaw(err.rawBody) : null;
+          errRaw = err.rawBody ?? null;
         } else {
           errCode = 'TURN_TIMEOUT';
         }
       }
 
+      let turn: AgentTurnResponse | undefined;
+      if (errCode === null && rawRes !== undefined) {
+        // 三段式校验（validation.ts 唯一收口；HTTP 状态/JSON/形状三层同码 BAD_JSON）
+        const v = validateTurnResponse(rawRes);
+        if (!v.ok) {
+          errCode = 'BAD_JSON';
+          errRaw = rawRes.raw;
+        } else {
+          turn = v.response;
+        }
+      }
+
       if (errCode !== null || turn === undefined) {
-        const { streakHit } = await recordProtocolError(runId, seq, errCode ?? 'TURN_TIMEOUT', rawBody, false);
+        // 路径 B：无 assistant 块、user PROTOCOL_ERROR 文本、计步 + streak+1（protocol-errors.ts）
+        const { streakHit } = await tx(deps.pool, (c) =>
+          recordProtocolErrorStep(c, {
+            runId,
+            seq,
+            code: errCode ?? 'TURN_TIMEOUT',
+            rawResponse: errRaw,
+            stepCounted: false,
+          }),
+        );
         if (streakHit) {
           const end = await tx(deps.pool, (c) =>
             endAgentRun(c, { runId, status: 'failed', endReason: 'protocol_errors' }),
@@ -305,7 +292,7 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         const { rowCount } = await client.query(
           `UPDATE agent_run_step SET status='turn_received', raw_response=$3, updated_at=now()
            WHERE run_id=$1 AND seq=$2 AND status='turn_dispatched'`,
-          [runId, seq, clipRaw(rawBody ?? JSON.stringify(turn))],
+          [runId, seq, clipRawResponse(rawRes?.raw)],
         );
         if (rowCount !== 1) return false;
         await client.query(
@@ -346,7 +333,10 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         return rows.length > 0;
       });
       if (dup) {
-        const { streakHit } = await recordProtocolError(runId, seq, 'DUPLICATE_TOOL_USE_ID', null, true);
+        // 路径 B（turn_received 已计步 → stepCounted:true 防重复计）
+        const { streakHit } = await tx(deps.pool, (c) =>
+          recordProtocolErrorStep(c, { runId, seq, code: 'DUPLICATE_TOOL_USE_ID', stepCounted: true }),
+        );
         if (streakHit) {
           const end = await tx(deps.pool, (c) =>
             endAgentRun(c, { runId, status: 'failed', endReason: 'protocol_errors' }),
@@ -358,21 +348,24 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
       }
 
       const assistantBlock = [{ role: 'assistant', content: [{ type: 'tool_use', id: tool.id, name: tool.name, input: tool.input }] }];
-      const schemaError = validateToolInput(tool.name, tool.input);
+      // 路径 A：未知名 → UNKNOWN_TOOL；入参不合 schema → INVALID_INPUT（protocol-errors.ts 落库）
       if (!AGENT_TOOL_NAMES.has(tool.name)) {
-        await appendToolResult(runId, seq, tool.id, assistantBlock, {
-          content: JSON.stringify({ code: 'UNKNOWN_TOOL', message: `unknown tool: ${tool.name}` }),
-          isError: true,
-          errorCode: 'UNKNOWN_TOOL',
-        });
+        await tx(deps.pool, (c) =>
+          appendToolErrorResult(c, {
+            runId, seq, toolUseId: tool.id, toolName: tool.name, input: tool.input,
+            code: 'UNKNOWN_TOOL', message: `unknown tool: ${tool.name}`,
+          }),
+        );
         continue;
       }
+      const schemaError = validateToolInput(tool.name, tool.input);
       if (schemaError !== null) {
-        await appendToolResult(runId, seq, tool.id, assistantBlock, {
-          content: JSON.stringify({ code: 'INVALID_INPUT', message: schemaError }),
-          isError: true,
-          errorCode: 'INVALID_INPUT',
-        });
+        await tx(deps.pool, (c) =>
+          appendToolErrorResult(c, {
+            runId, seq, toolUseId: tool.id, toolName: tool.name, input: tool.input,
+            code: 'INVALID_INPUT', message: schemaError,
+          }),
+        );
         continue;
       }
 
@@ -476,17 +469,3 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
 }
 
 const MAX_RESULT_SUMMARY_CHARS = 200; // resultSummary ≤200 字（REQ §2.3 行）
-
-/** input_schema.required 全覆盖的最小校验（T-P4-06 细化 schema 语义） */
-function validateToolInput(name: string, input: unknown): string | null {
-  const def = AGENT_TOOLS.find((t) => t.name === name);
-  if (def === undefined) return `unknown tool: ${name}`;
-  const required = (def.input_schema as { required?: string[] }).required ?? [];
-  if (typeof input !== 'object' || input === null) return `missing input for ${name}`;
-  for (const key of required) {
-    if ((input as Record<string, unknown>)[key] === undefined) {
-      return `missing required param: ${key}`;
-    }
-  }
-  return null;
-}

@@ -88,8 +88,18 @@ export interface AgentClientDeps {
   readonly fetchImpl?: typeof fetch;
 }
 
+export interface AgentRawResponse {
+  readonly status: number;
+  readonly raw: string;
+}
+
 export interface AgentClient {
-  callTurn(req: AgentTurnRequest): Promise<AgentTurnResponse>;
+  /**
+   * 纯传输层（三段式归调用方 server/src/modules/agent/validation.ts——T-P4-06 唯一收口）：
+   * 返回 {status, raw}；HTTP 层失败（超时/网络）抛 AgentClientError(TURN_TIMEOUT)。
+   * 响应校验三段（HTTP 状态 → JSON 解析 → 形状）由 validateTurnResponse 完成，本层不判。
+   */
+  rawTurn(req: AgentTurnRequest): Promise<AgentRawResponse>;
   callAudit(req: AgentAuditRequest): Promise<AgentAuditResponse>;
 }
 
@@ -121,64 +131,14 @@ async function postJson(
   }
 }
 
-/** 三段式共用前两段：HTTP 状态 → JSON 解析（围栏/夹文天然 JSON.parse 失败） */
-function stage12(status: number, raw: string): unknown {
-  if (status < 200 || status >= 300) {
-    throw new AgentClientError('BAD_JSON', `agent responded HTTP ${status}`, raw);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new AgentClientError('BAD_JSON', 'agent response is not valid JSON', raw);
-  }
-}
-
-/** 第三段：/agent/turn 形状（缺 stop_reason / 块数≠1 / stop_reason 与块类型不一致 → BAD_JSON） */
-function validateTurnShape(body: unknown, raw: string): AgentTurnResponse {
-  const bad = (why: string): AgentClientError =>
-    new AgentClientError('BAD_JSON', `agent turn shape invalid: ${why}`, raw);
-  if (!isRecord(body)) throw bad('body is not an object');
-  const stopReason = body['stop_reason'];
-  const content = body['content'];
-  if (typeof stopReason !== 'string') throw bad('missing stop_reason');
-  if (!Array.isArray(content) || content.length !== 1) throw bad('content must have exactly one block');
-  const block: unknown = content[0];
-  if (!isRecord(block) || typeof block['type'] !== 'string') throw bad('block malformed');
-  const rec: Record<string, unknown> = block;
-  const blockType = rec['type'];
-
-  if (stopReason === 'tool_use') {
-    if (blockType !== 'tool_use') throw bad('stop_reason tool_use but block type mismatch');
-    const id = rec['id'];
-    const name = rec['name'];
-    if (typeof id !== 'string' || typeof name !== 'string') {
-      throw bad('tool_use block missing id/name');
-    }
-    return {
-      stopReason: 'tool_use',
-      block: { type: 'tool_use', id, name, input: rec['input'] },
-    };
-  }
-  if (stopReason === 'end_turn') {
-    const text = rec['text'];
-    if (blockType !== 'text' || typeof text !== 'string') {
-      throw bad('stop_reason end_turn but block type mismatch');
-    }
-    return { stopReason: 'end_turn', block: { type: 'text', text } };
-  }
-  throw bad(`unknown stop_reason: ${stopReason}`);
-}
-
 export function createAgentClient(deps: AgentClientDeps): AgentClient {
   const impl = { baseUrl: deps.baseUrl, fetchImpl: deps.fetchImpl ?? fetch };
   const turnTimeout = deps.turnTimeoutMs ?? 12_000;
   const auditTimeout = deps.auditTimeoutMs ?? 5_000;
 
   return {
-    async callTurn(req: AgentTurnRequest): Promise<AgentTurnResponse> {
-      const { status, raw } = await postJson(impl, '/agent/turn', req, turnTimeout);
-      const body = stage12(status, raw);
-      return validateTurnShape(body, raw);
+    async rawTurn(req: AgentTurnRequest): Promise<AgentRawResponse> {
+      return postJson(impl, '/agent/turn', req, turnTimeout);
     },
 
     async callAudit(req: AgentAuditRequest): Promise<AgentAuditResponse> {

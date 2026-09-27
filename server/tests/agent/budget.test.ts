@@ -17,15 +17,21 @@ import {
   PROTOCOL_ERROR_STREAK_LIMIT,
 } from '../../src/constants.js';
 import { createAgentExecutor } from '../../src/modules/agent/executor.js';
-import type { AgentClient, AgentTurnResponse } from '../../src/agentclient/index.js';
+import type { AgentClient } from '../../src/agentclient/index.js';
 
 const silent = { info() {}, warn() {}, error() {} };
 
 class FinishClient implements AgentClient {
   calls = 0;
-  async callTurn(): Promise<AgentTurnResponse> {
+  async rawTurn() {
     this.calls += 1;
-    return { stopReason: 'tool_use', block: { type: 'tool_use', id: `tu_${this.calls}`, name: 'finish', input: { summary: 's' } } };
+    return {
+      status: 200,
+      raw: JSON.stringify({
+        stop_reason: 'tool_use',
+        content: [{ type: 'tool_use', id: `tu_${this.calls}`, name: 'finish', input: { summary: 's' } }],
+      }),
+    };
   }
   async callAudit() { return { verdict: 'pass' as const }; }
 }
