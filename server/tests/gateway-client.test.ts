@@ -8,12 +8,18 @@
 //   server 增加 workspace devDep，经包名子路径 `mock-gateway/src/app.js` 引入工厂（DES/14 §7 允许 workspace 内 import 装配）。
 import { createServer, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createGatewayApp } from 'mock-gateway/src/app.js';
 import { createGatewayClient } from '../src/gateway/client.js';
 import { GatewayError, GatewayTimeoutError } from '../src/gateway/errors.js';
 import { subscribeEvents } from '../src/gateway/sse.js';
+import {
+  BY_CLIENT_ID_TIMEOUT_MS,
+  GATEWAY_TIMEOUT_DEFAULT_MS,
+  KICK_TIMEOUT_MS,
+  SEND_TIMEOUT_BUDGET_MS,
+} from '../src/constants.js';
 
 /** 延迟 void 信号：lib=ES2023 无 Promise.withResolvers；executor 同步赋值，返回时 resolve 已是真函数 */
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -300,6 +306,70 @@ describe('gateway client (T-P2-01)', () => {
       expect(timeoutErr.timeoutMs).toBe(150);
       expect(Date.now() - startedAt).toBeLessThan(5000);
       await expect(sawAbort.promise).resolves.toBeUndefined(); // AbortController 真取消，非静默挂死
+    });
+
+    it('budget covers body stall: headers arrive, body never finishes → GatewayTimeoutError (review fix 1)', { timeout: 10_000 }, async () => {
+      // 真实墙钟例外：超时行为本身是对平台时钟的集成验证（同上用例）
+      // 回归（T-P2-01 review #1）：旧实现 fetch 返回（头部到达）即 clearTimeout，
+      // 吊死的 body 逃逸预算永挂——预算必须覆盖到 body 读完为止
+      slowServer = createServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.write('{"gro'); // body 故意不写完：头部已到，流吊死
+      });
+      const listening = deferred();
+      slowServer.listen(0, '127.0.0.1', () => listening.resolve());
+      await listening.promise;
+      const port = (slowServer.address() as AddressInfo).port;
+      const client = createGatewayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        timeouts: { default: 150 },
+      });
+      const startedAt = Date.now();
+      const err = await client.createGroup({ creatorAccountId: 'a' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(GatewayTimeoutError);
+      const timeoutErr = err as GatewayTimeoutError;
+      expect(timeoutErr.endpoint).toBe('createGroup');
+      expect(timeoutErr.timeoutMs).toBe(150);
+      expect(Date.now() - startedAt).toBeLessThan(5000);
+    });
+
+    it('per-endpoint budgets pinned: kick 6s / send 8s / by-client-id 5s / default 10s surface verbatim on timeoutMs (review fix 3)', async () => {
+      // 零墙钟手法：setTimeout spy 同步触发回调 → signal 在 fetch 派发前已 abort，请求即刻以
+      // GatewayTimeoutError 拒绝，其 timeoutMs 仍携带 constants 里该端点的真实预算（DES/01 §4.4）。
+      // kick↔send 一类接线错必使下面某条断言变红（旧测试对此不可见）。
+      const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void) => {
+        fn();
+        return undefined;
+      }) as unknown as typeof setTimeout);
+      try {
+        const client = createGatewayClient({ baseUrl: 'http://127.0.0.1:1' }); // 不会真连接：signal 已先 abort
+
+        const kickErr = await client
+          .kick('g1', { byAccountId: 'a', targetPlatformUserId: 'p' })
+          .catch((e: unknown) => e);
+        expect(kickErr).toBeInstanceOf(GatewayTimeoutError);
+        expect((kickErr as GatewayTimeoutError).endpoint).toBe('kick');
+        expect((kickErr as GatewayTimeoutError).timeoutMs).toBe(KICK_TIMEOUT_MS);
+
+        const sendErr = await client
+          .send('g1', { accountId: 'a', clientMsgId: 'c1', text: 't' })
+          .catch((e: unknown) => e);
+        expect(sendErr).toBeInstanceOf(GatewayTimeoutError);
+        expect((sendErr as GatewayTimeoutError).endpoint).toBe('send');
+        expect((sendErr as GatewayTimeoutError).timeoutMs).toBe(SEND_TIMEOUT_BUDGET_MS);
+
+        const probeErr = await client.getMessageByClientMsgId('g1', 'c1').catch((e: unknown) => e);
+        expect(probeErr).toBeInstanceOf(GatewayTimeoutError);
+        expect((probeErr as GatewayTimeoutError).endpoint).toBe('byClientId');
+        expect((probeErr as GatewayTimeoutError).timeoutMs).toBe(BY_CLIENT_ID_TIMEOUT_MS);
+
+        const defaultErr = await client.createGroup({ creatorAccountId: 'a' }).catch((e: unknown) => e);
+        expect(defaultErr).toBeInstanceOf(GatewayTimeoutError);
+        expect((defaultErr as GatewayTimeoutError).endpoint).toBe('createGroup');
+        expect((defaultErr as GatewayTimeoutError).timeoutMs).toBe(GATEWAY_TIMEOUT_DEFAULT_MS);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

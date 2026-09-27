@@ -102,17 +102,33 @@ async function request<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs);
-  let response: Response;
+  // 预算覆盖整次调用（T-P2-01 review #1）：teardown 统一放在最外层 finally——
+  // 头部到达后 body 吊死同样被 AbortController 掐断，不再逃逸端点预算。
   try {
-    response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetch(`${baseUrl}${path}`, {
       method: init.method,
       headers: init.body === undefined ? undefined : { 'content-type': 'application/json' },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: controller.signal,
     });
+
+    if (!response.ok) {
+      // 错误 body 是 best-effort：读取被超时掐断/失败时退化为 null——状态码已知，
+      // 分类仍按「body 码优先、状态推导兜底」给出（不因 body 缺失改判超时）
+      const raw = await response.text().catch(() => '');
+      const parsed = raw === '' ? null : safeJson(raw);
+      const bodyCode = isRecord(parsed) ? parsed.code : undefined;
+      const code = isNamedGatewayCode(bodyCode) ? bodyCode : codeFromStatus(response.status);
+      throw new GatewayError({ endpoint, status: response.status, code, body: parsed });
+    }
+
+    const text = await response.text();
+    const parsed = safeJson(text);
+    return validate(parsed);
   } catch (err) {
+    if (err instanceof GatewayError) throw err; // 类型化错误（HTTP 映射 / 浅校验）逐字透传
     if (controller.signal.aborted) {
-      // 我方超时取消（AbortController）——异常带端点名与预算值（卡片 b）
+      // 我方超时取消（AbortController）——异常带端点名与预算值（卡片 b）；连接段与 body 段同判
       throw new GatewayTimeoutError(endpoint, init.timeoutMs);
     }
     throw new GatewayError({
@@ -124,19 +140,6 @@ async function request<T>(
   } finally {
     clearTimeout(timer);
   }
-
-  if (!response.ok) {
-    const raw = await response.text().catch(() => '');
-    let parsed: unknown = null;
-    if (raw !== '') parsed = safeJson(raw);
-    const bodyCode = isRecord(parsed) ? parsed.code : undefined;
-    const code = isNamedGatewayCode(bodyCode) ? bodyCode : codeFromStatus(response.status);
-    throw new GatewayError({ endpoint, status: response.status, code, body: parsed });
-  }
-
-  const text = await response.text();
-  const parsed = safeJson(text);
-  return validate(parsed);
 }
 
 function safeJson(text: string): unknown {
@@ -274,6 +277,8 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
     async downloadMedia(mediaUrl) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeouts.default);
+      // 预算覆盖整次下载（与 request() 同一 teardown 形态，T-P2-01 review #2）：
+      // arrayBuffer 在 try 内、clearTimeout 在最外层 finally——成功/失败/超时路径都必然清理
       try {
         const response = await fetch(mediaUrl, { signal: controller.signal });
         if (!response.ok) {
