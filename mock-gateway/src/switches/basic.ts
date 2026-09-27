@@ -2,9 +2,9 @@
 // 契约出处：DES/14 §5 开关表行 1/2/3（开关名逐字照抄，不自创）、§3 时序引擎（默认区间随机、
 // scenario 可钉死为定值）、§4（同一开关重复调用 = 覆盖参数——覆盖语义由 state.switches.set 天然成立）。
 // 红线（宪法 §3-8）：这里的钉值与双推是 S1/S2 的验收驱动，禁止为了让测试变绿而弱化。
-import type { FrameExpander } from '../sse.js';
+import type { FrameDelivery, FrameSink } from '../sse.js';
 import type { GatewayState, LedgerFrame } from '../state.js';
-import { activeSwitch, readNumberParam, type SwitchTarget } from '../switches.js';
+import { activeSwitch, randomBetween, readNumberParam, type SwitchTarget } from '../switches.js';
 
 // —— 契约时序区间（QR §1 / REQ §2.1）：mock 自持，不依赖 server 的 constants.ts ——
 /** gw-1：send 的 202 本身可能 1–2s（REQ §2.1） */
@@ -13,11 +13,6 @@ const SEND_ACCEPT_MAX_MS = 2000;
 /** gw-2：message_sent 通常 50–2000ms 后到达（REQ §2.1；QR §1） */
 const MESSAGE_SENT_MIN_MS = 50;
 const MESSAGE_SENT_MAX_MS = 2000;
-
-/** 契约区间内均匀取整（mock 内部随机源，非契约数字） */
-export function randomBetween(min: number, max: number): number {
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
 
 /**
  * gw-1 `send_accept_slow`：send 的 202 延迟（DES/14 §5 行 1）。
@@ -49,8 +44,15 @@ export function resolveMessageSentDelayMs(state: GatewayState, target: SwitchTar
  * agent 触发幂等吸收（S2 的后端防御分支）。
  * 开关在每次投帧时读取：连接建立后再打开/关闭都即时生效（arrange 顺序无关）。
  * 全局开关（不按 target 收窄）：契约措辞是「每个事件推两次」。
+ * 位于投递链**内层**（最贴近 socket）：gw-4 先定序、本层再复制，双推的两份因此始终相邻。
  */
-export function createBasicFrameExpander(state: GatewayState): FrameExpander {
-  return (frame: LedgerFrame): LedgerFrame[] =>
-    activeSwitch(state, 'dup_push_all') === undefined ? [frame] : [frame, frame];
+export function createDupDelivery(state: GatewayState, sink: FrameSink): FrameDelivery {
+  return {
+    push: (frame: LedgerFrame): void => {
+      sink(frame);
+      if (activeSwitch(state, 'dup_push_all') !== undefined) {
+        sink(frame); // 同一帧再投一次（同 eventId、同 data；at-least-once 的极端形态）
+      }
+    },
+  };
 }

@@ -9,6 +9,7 @@ import {
   type GatewayState,
   type SwitchConfig,
 } from './state.js';
+import { injectExternalMemberEvents, injectOfflineBacklog } from './switches/backlog.js';
 
 /**
  * 合法开关名全集（DES/14 §5 清单逐字；一行两名的拆开登记）。
@@ -80,6 +81,24 @@ function applyAccountDomainSwitch(
   return null;
 }
 
+/**
+ * arm（打开开关）时刻的即时接线：开关 11/12 置账号终态标志、gw-5 注入离线补投帧、
+ * gw-28 注入外部成员进出群事件。返回非 null = arrange 失败 → 400 且开关不登记（半生效比拒绝更糟）。
+ */
+function armSwitch(state: GatewayState, switchName: string, config: SwitchConfig): string | null {
+  const accountError = applyAccountDomainSwitch(state, switchName, config, true);
+  if (accountError !== null) {
+    return accountError;
+  }
+  if (switchName === 'offline_backlog') {
+    return injectOfflineBacklog(state, config);
+  }
+  if (switchName === 'external_member_events') {
+    return injectExternalMemberEvents(state, config);
+  }
+  return null;
+}
+
 export function registerTestPlane(app: FastifyInstance, state: GatewayState): void {
   // POST /_test/scenario { switch, params?, target? }：打开开关；重复调用 = 覆盖参数（DES/14 §4）
   app.post('/_test/scenario', async (request, reply) => {
@@ -104,7 +123,7 @@ export function registerTestPlane(app: FastifyInstance, state: GatewayState): vo
       }
       config.target = body.target as Record<string, unknown>;
     }
-    const applyError = applyAccountDomainSwitch(state, switchName, config, true);
+    const applyError = armSwitch(state, switchName, config);
     if (applyError !== null) {
       // arrange 期失败：开关不登记（半生效状态比拒绝更糟）
       return reply.code(400).send({ message: applyError });
@@ -113,7 +132,8 @@ export function registerTestPlane(app: FastifyInstance, state: GatewayState): vo
     return reply.send({ ok: true });
   });
 
-  // POST /_test/scenario/clear { switch? }：关闭指定/全部开关（DES/14 §4）
+  // POST /_test/scenario/clear { switch? }：关闭指定/全部开关（DES/14 §4）。
+  // clear 只撤销有状态标志（11/12 终态）；gw-5/gw-28 已注入的账本事件不撤回（账本 append-only）。
   app.post('/_test/scenario/clear', async (request, reply) => {
     const body = (request.body ?? {}) as { switch?: unknown };
     if (body.switch === undefined) {

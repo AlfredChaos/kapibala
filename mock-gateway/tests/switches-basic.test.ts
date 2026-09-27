@@ -3,187 +3,19 @@
 // §4（counters 是验收断言真值来源；同一开关重复调用 = 覆盖参数）；S1/S2 编排（VITEST_PLAN §2）。
 // 说明（真实定时器例外）：钉值时序断言必须观测真实时钟（>= 钉值 + 有限上界）；
 // 上界一律取**契约区间之外**的值——钉值被忽略时随机延迟必落在区间内，测试即变红（假绿防线）。
+// 投递 seam 的乱序/延迟自检随 gw-4 落在 tests/switches-timing.test.ts（T-P2-12）。
 import { setTimeout as sleep } from 'node:timers/promises';
-import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
-import { createGatewayApp, type GatewayApp } from '../src/app.js';
-import { registerSseRoutes } from '../src/sse.js';
-import { appendLedger, createGatewayState, type LedgerFrame } from '../src/state.js';
-
-type InjectResponse = { statusCode: number; json(): Promise<unknown> };
-
-/** 线上帧（SSE wire）：id/event 解析值 + 原始帧块（断言「同一帧投两次」用逐字节比较） */
-interface WireFrame {
-  id: number;
-  event: string;
-  wire: string;
-}
-
-/** `GET /_test/counters` 的 JSON 形状（DES/14 §4 五项） */
-interface CountersJson {
-  sendCallsByAccount: Record<string, number>;
-  sendCallsByClientMsgId: Record<string, number>;
-  landedMessages: number;
-  kickCalls: number;
-  framesEmitted: number;
-}
-
-function newApp(): GatewayApp {
-  return createGatewayApp({ seedAccountIds: ['acc-01', 'acc-02'] });
-}
-
-async function jsonOf(res: InjectResponse): Promise<Record<string, unknown>> {
-  expect(res.statusCode).toBeLessThan(300);
-  return (await res.json()) as Record<string, unknown>;
-}
-
-async function connect(app: GatewayApp, accountId: string): Promise<void> {
-  expect((await app.inject({ method: 'POST', url: `/accounts/${accountId}/connect` })).statusCode).toBe(200);
-}
-
-async function scenario(
-  app: GatewayApp,
-  switchName: string,
-  params?: Record<string, unknown>,
-  target?: Record<string, unknown>,
-): Promise<void> {
-  const res = await app.inject({
-    method: 'POST',
-    url: '/_test/scenario',
-    payload: { switch: switchName, params, target },
-  });
-  expect(res.statusCode).toBe(200);
-}
-
-async function countersOf(app: GatewayApp): Promise<CountersJson> {
-  const res = await app.inject({ method: 'GET', url: '/_test/counters' });
-  expect(res.statusCode).toBe(200);
-  return (await res.json()) as CountersJson;
-}
-
-async function createGroup(app: GatewayApp, creatorAccountId: string): Promise<string> {
-  const body = await jsonOf(await app.inject({ method: 'POST', url: '/groups', payload: { creatorAccountId } }));
-  return body['groupId'] as string;
-}
-
-async function createInvite(app: GatewayApp, groupId: string): Promise<string> {
-  const body = await jsonOf(await app.inject({ method: 'POST', url: `/groups/${groupId}/invite` }));
-  return body['inviteLink'] as string;
-}
-
-/** arrange：acc-01 建群 + acc-02 入群（member_joined 钉值后落定，+1 帧）→ groupId */
-async function makeGroupWithMember(app: GatewayApp, joinedDelayMs = 40): Promise<string> {
-  await connect(app, 'acc-01');
-  await connect(app, 'acc-02');
-  const groupId = await createGroup(app, 'acc-01');
-  await scenario(app, 'invite_not_ready', { readyAfterMs: 0 }, { groupId }); // 链接立即就绪（gw-20 钉 0）
-  const inviteLink = await createInvite(app, groupId);
-  await scenario(app, 'member_joined_delay', { delayMs: joinedDelayMs }, { groupId });
-  const join = await app.inject({
-    method: 'POST',
-    url: `/groups/${groupId}/join`,
-    payload: { accountId: 'acc-02', inviteLink },
-  });
-  expect(join.statusCode).toBe(202);
-  await sleep(joinedDelayMs + 80); // 等 member_joined 落定
-  return groupId;
-}
-
-async function send(
-  app: GatewayApp,
-  groupId: string,
-  accountId: string,
-  clientMsgId: string,
-  text = 'x',
-): Promise<InjectResponse> {
-  return app.inject({
-    method: 'POST',
-    url: `/groups/${groupId}/send`,
-    payload: { accountId, clientMsgId, text },
-  });
-}
-
-function puidOf(app: GatewayApp, accountId: string): string {
-  return app.gatewayState.accounts.get(accountId)?.platformUserId ?? '';
-}
-
-function framesOf(app: GatewayApp, type: LedgerFrame['type']): LedgerFrame[] {
-  return app.gatewayState.ledger.filter((frame) => frame.type === type);
-}
-
-/** 解析一个 SSE 帧块（`id:` / `event:` / `data:` 三行）；keepalive 注释行返回 null */
-function parseWireFrame(block: string): WireFrame | null {
-  const lines = block.split('\n');
-  const idLine = lines.find((line) => line.startsWith('id: '));
-  if (idLine === undefined) {
-    return null;
-  }
-  const id = Number(idLine.slice('id: '.length));
-  if (!Number.isFinite(id)) {
-    return null;
-  }
-  return { id, event: lines.find((line) => line.startsWith('event: '))?.slice('event: '.length) ?? '', wire: block };
-}
-
-/**
- * 经 app.listen + fetch 收 SSE 帧（收满 count 即断开）。
- * onOpen 在连接建立后执行——实时帧必须在订阅之后产生（不带 since 时不回放历史，REQ §2.1）。
- */
-async function collectFrames(
-  app: GatewayApp,
-  path: string,
-  count: number,
-  onOpen?: () => Promise<void>,
-): Promise<WireFrame[]> {
-  await app.listen({ port: 0, host: '127.0.0.1' });
-  const address = app.server.address();
-  if (address === null || typeof address === 'string') {
-    throw new Error('expected TCP address');
-  }
-  const baseUrl = `http://127.0.0.1:${address.port}`;
-  const controller = new AbortController();
-  const frames: WireFrame[] = [];
-  let collector: Promise<void> | undefined;
-  try {
-    collector = (async (): Promise<void> => {
-      const res = await fetch(`${baseUrl}${path}`, { signal: controller.signal });
-      const reader = res.body?.getReader();
-      if (reader === undefined) {
-        throw new Error('SSE response has no body');
-      }
-      const decoder = new TextDecoder();
-      let buffer = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) {
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        let at = buffer.indexOf('\n\n');
-        while (at !== -1) {
-          const frame = parseWireFrame(buffer.slice(0, at));
-          buffer = buffer.slice(at + 2);
-          at = buffer.indexOf('\n\n');
-          if (frame !== null) {
-            frames.push(frame);
-            if (frames.length >= count) {
-              controller.abort();
-              return;
-            }
-          }
-        }
-      }
-    })();
-    await sleep(150); // 等连接建立
-    await onOpen?.();
-    await collector;
-  } finally {
-    controller.abort();
-    await collector?.catch(() => undefined); // arrange 抛错时不留悬空 rejection
-    await app.close();
-  }
-  return frames;
-}
+import {
+  collectFrames,
+  countersOf,
+  framesOf,
+  makeGroupWithMember,
+  newApp,
+  puidOf,
+  scenario,
+  send,
+} from './helpers/gateway.js';
 
 describe('gw-3 dup_push_all：每个事件帧投递两次（同 eventId，DES/14 §5 行 3）', () => {
   it('实时帧：一条 emit → 同一帧投递两次（id 与线上字节全同）；账本仍一行、framesEmitted 仍 1', async () => {
@@ -345,32 +177,5 @@ describe('counters 完备性（DES/14 §4：验收断言的真值来源）', () 
       kickCalls: 0,
       framesEmitted: 0,
     });
-  });
-});
-
-describe('投递 seam 加宽自检（T-P1-05；gw-4 reorder_1s 在 T-P2-12 接入同一 seam）', () => {
-  it('展开点在水位过滤之后：相邻帧交换（先写大 eventId 再写小的）一帧不丢', async () => {
-    const state = createGatewayState(['acc-01']);
-    const app = Fastify() as unknown as GatewayApp;
-    app.decorate('gatewayState', state);
-    registerSseRoutes(app, state, {
-      // 每连接一个缓冲：始终扣住最新帧，有前帧时写出 [新, 旧]（相邻交换的最小形状）
-      createFrameExpander: () => {
-        let held: LedgerFrame | undefined;
-        return (frame: LedgerFrame): LedgerFrame[] => {
-          const previous = held;
-          held = frame;
-          return previous === undefined ? [] : [frame, previous];
-        };
-      },
-    });
-    appendLedger(state, 'account_status', { accountId: 'acc-01', status: 'suspended' });
-    appendLedger(state, 'member_left', { groupId: 'gw-1', platformUserId: 'puid-x' });
-
-    const frames = await collectFrames(app, '/events?since=0', 2);
-    // 乱序投递成立：eventId 1 在水位已推到 2 之后仍写出（旧 seam 的 `eventId > lastSentEventId` 会丢掉它）
-    expect(frames.map((frame) => frame.id)).toEqual([2, 1]);
-    expect(frames.map((frame) => frame.event)).toEqual(['member_left', 'account_status']);
-    expect(state.ledger).toHaveLength(2); // 修饰只改投递，不改账本
   });
 });

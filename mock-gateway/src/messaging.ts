@@ -4,8 +4,8 @@
 import type { FastifyInstance } from 'fastify';
 import { assertAccountOperationAllowed, type AccountGateError } from './accounts.js';
 import { appendLedger, type GatewayState, type MockMessageRecord } from './state.js';
-import { activeSwitch, readBooleanParam, readNumberParam, readStringParam } from './switches.js';
-import { randomBetween, resolveMessageSentDelayMs, resolveSendAcceptDelayMs } from './switches/basic.js';
+import { activeSwitch, randomBetween, readBooleanParam, readNumberParam, readStringParam } from './switches.js';
+import { resolveMessageSentDelayMs, resolveSendAcceptDelayMs } from './switches/basic.js';
 
 // —— 契约时序（QR §1 / REQ §2.1）；mock 自持（不依赖 server 的 constants.ts）——
 // send 202（gw-1）与 message_sent（gw-2）的钉值/区间解析归 switches/basic.ts（T-P1-05）。

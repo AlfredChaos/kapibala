@@ -5,5 +5,6 @@
 - 端口 `:4100`（`PORT`）；单进程、内存状态、事件账本，**无 DB、无外部依赖**（DES/14 §6）。
 - `/_test` 控制平面是后端测试 arrange 的唯一入口（scenario/clear/reset/counters/emit）。
 - 契约时序数字全部照抄速查表并可固定为确定值；**故障开关是验收资产**（根 §3-8）：禁止为了让测试变绿而弱化契约行为。
-- 开关语义归 `src/switches/*.ts`（`basic.ts` = gw-1/2/3）；SSE 投递修饰（gw-3 双推、gw-4 乱序）统一走 `src/sse.ts` 的 `createFrameExpander` seam——每连接一实例、展开点在**水位过滤之后**（展开结果不再过水位，否则同 eventId 的第二份与乱序后的旧帧会被丢掉）。
+- 开关语义归 `src/switches/*.ts`：`basic.ts` = gw-1/2/3（send/message_sent 钉值 + 双推）、`timing.ts` = gw-4/19（相邻乱序 + member_joined 钉值）、`backlog.ts` = gw-5/28（arm 时刻注入离线补投帧 / 外部成员进出群事件）。
+- SSE 投递修饰统一走 `src/sse.ts` 的 `createFrameDelivery` seam（`(sink) => FrameDelivery`：每连接一实例，可 0..n 次、可**延后**写 sink）；投递链在 `app.ts` 串联为 **gw-4 定序 → gw-3 复制 → socket**。seam 位于水位过滤**之后**且 sink 不再过滤——否则双推的第二份与乱序后的旧帧都会被 `eventId > lastSentEventId` 丢掉；水位取已写 eventId 的单调最大值。
 - 契约权威：`docs/analysis/02-gateway-contract.md` + 速查表；设计：`docs/design/14-gateway-service.md`。

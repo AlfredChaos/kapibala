@@ -5,19 +5,14 @@
 import type { FastifyInstance } from 'fastify';
 import { assertAccountOperationAllowed, assertConnectAllowed, type AccountGateError } from './accounts.js';
 import { appendLedger, type GatewayState } from './state.js';
-import { activeSwitch, readNumberParam } from './switches.js';
+import { activeSwitch, randomBetween, readNumberParam } from './switches.js';
+import { resolveMemberJoinedDelayMs } from './switches/timing.js';
 
 // —— 契约时序（QR §1 / REQ §2.1）；mock 自己持有（mock 不依赖 server 的 constants.ts）——
-/** join 受理后 member_joined 通常 100–1500ms 到达（REQ §2.1；QR §1） */
-const MEMBER_JOINED_DELAY_MIN_MS = 100;
-const MEMBER_JOINED_DELAY_MAX_MS = 1500;
+// member_joined 的钉值/区间解析归 switches/timing.ts（gw-19，T-P2-12）。
 /** invite 的 readyAfterMs「0 或数秒」（REQ §2.1）：数秒档的 mock 内部默认区间（非契约数字） */
 const INVITE_READY_SLOW_MIN_MS = 2000;
 const INVITE_READY_SLOW_MAX_MS = 5000;
-
-function randomBetween(min: number, max: number): number {
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
 
 function sendGateError(reply: { code: (s: number) => { send: (b: unknown) => unknown } }, gate: AccountGateError) {
   reply.code(gate.statusCode).send(gate.body);
@@ -114,8 +109,7 @@ export function registerGroupRoutes(app: FastifyInstance, state: GatewayState): 
     // 202 受理；入群与事件按契约时序延后（钉值或区间随机），也可能永不到（gw-18）
     const joinTarget = { groupId, accountId: body.accountId };
     if (activeSwitch(state, 'member_joined_never', joinTarget) === undefined) {
-      const pinnedDelay = readNumberParam(activeSwitch(state, 'member_joined_delay', joinTarget), 'delayMs');
-      const delayMs = pinnedDelay ?? randomBetween(MEMBER_JOINED_DELAY_MIN_MS, MEMBER_JOINED_DELAY_MAX_MS);
+      const delayMs = resolveMemberJoinedDelayMs(state, joinTarget);
       const puid = account.platformUserId;
       setTimeout(() => {
         // 事件时刻才真正入群；群已消失（reset/删除）或已重复入群则跳过

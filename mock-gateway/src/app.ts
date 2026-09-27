@@ -7,7 +7,8 @@ import { registerMediaRoutes } from './media.js';
 import { registerMessagingRoutes } from './messaging.js';
 import { registerTestPlane } from './test-plane.js';
 import { createGatewayState, DEFAULT_SEED_ACCOUNTS, type GatewayState } from './state.js';
-import { createBasicFrameExpander } from './switches/basic.js';
+import { createDupDelivery } from './switches/basic.js';
+import { createReorderDelivery } from './switches/timing.js';
 
 /** Fastify 实例 + 状态句柄（测试与后续域模块直接读状态/账本） */
 export type GatewayApp = FastifyInstance & { gatewayState: GatewayState };
@@ -40,8 +41,15 @@ export function createGatewayApp(options: GatewayAppOptions = {}): GatewayApp {
 
   registerAccountRoutes(app, state);
   registerTestPlane(app, state);
-  // SSE 推送器（T-P1-02）+ 投递修饰 seam（T-P1-05：gw-3 双推；gw-4 乱序在 T-P2-12 接入同一 seam）
-  registerSseRoutes(app, state, { createFrameExpander: () => createBasicFrameExpander(state) });
+  // SSE 推送器（T-P1-02）+ 投递链（DES/14 §3「推送器按开关修饰后投递」）：
+  // gw-4 相邻乱序（外层定序，T-P2-12）→ gw-3 双推（内层复制，T-P1-05）→ socket。
+  // 定序在外、复制在内 → 双推的两份始终相邻；两开关各自独立可关（关则直通）。
+  registerSseRoutes(app, state, {
+    createFrameDelivery: (sink) => {
+      const dup = createDupDelivery(state, sink);
+      return createReorderDelivery(state, (frame) => dup.push(frame));
+    },
+  });
   registerGroupRoutes(app, state); // T-P1-03（最小 wiring 适配）
   registerMessagingRoutes(app, state); // T-P1-04（最小 wiring 适配）
   registerMediaRoutes(app); // T-P1-04（最小 wiring 适配）
