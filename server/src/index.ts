@@ -29,6 +29,9 @@ import { createScheduler, type Scheduler } from './scheduler/index.js';
 import { createScanRegistry, type ScanRegistry } from './scheduler/registry.js';
 import { registerDeadLetterScan } from './scheduler/deadletter-scan.js';
 import { registerRateLimitScan } from './scheduler/ratelimit-scan.js';
+import { registerJoinTimeoutScan } from './scheduler/join-timeout-scan.js';
+import { registerDispatchWakeupScan } from './scheduler/dispatch-wakeup.js';
+import { startOutboundDispatcher, type OutboundDispatcher } from './modules/messages/dispatcher.js';
 import { attachWsHub, type WsHub } from './ws/hub.js';
 import { createWsEventRetentionScan, WS_EVENT_RETENTION_SCAN_NAME } from './ws/retention.js';
 
@@ -85,6 +88,8 @@ export interface BootHandle {
   readonly wsHub: WsHub;
   /** 消费句柄；boot 返回时可能仍 pending（D3-2），stop() 会 await 后关停 */
   readonly consumer: Promise<EventConsumer>;
+  /** 出站 dispatcher 句柄（T-P3-02：wake 驱动 + 兜底扫描；stop 退避睡眠立醒） */
+  readonly dispatcher: OutboundDispatcher;
   stop(): Promise<void>;
 }
 
@@ -108,7 +113,16 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
 
   // 网关 client 先于 buildApp：账号域路由（connect/transition 补偿调用）需要注入同一实例（T-P2-05）
   const gateway = createGatewayClient({ baseUrl: config.gatewayUrl });
-  const app = await buildApp({ pool, logger, gateway, verifyAccessToken: createVerifyAccessToken(pool) });
+  // 出站 dispatcher（T-P3-02）：先于 buildApp 创建——onMessageAccepted 缝要往这里接线；
+  // 泵是惰性（无 wake 不占连接），创建即「启动」：wake/扫描/到期恢复三路唤醒由它内部 advisory lock 消化。
+  const outboundDispatcher = startOutboundDispatcher({ pool, gateway, logger });
+  const app = await buildApp({
+    pool,
+    logger,
+    gateway,
+    verifyAccessToken: createVerifyAccessToken(pool),
+    onMessageAccepted: outboundDispatcher.wake,
+  });
 
   // 分发注册表为 boot 共享实例（T-P2-04）：消费循环的分发、死信重试的 b) 重放、
   // 后续领域任务（T-P2-06/08/09…）的 handler 注册，全部指向同一张表。
@@ -152,7 +166,9 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   //    ws-event-retention（T-P2-10，30min 窗口清理）。
   const registry = options.registry ?? createScanRegistry();
   registerDeadLetterScan({ pool, registry, dispatch, logger });
-  registerRateLimitScan({ pool, registry, logger }); // T-P2-07：rate_limited 到期回 online + 唤醒 dispatcher 缝
+  registerRateLimitScan({ pool, registry, logger, wakeDispatcher: outboundDispatcher.wake }); // T-P2-07：到期回 online + 唤醒 dispatcher
+  registerDispatchWakeupScan({ pool, registry, logger, wake: outboundDispatcher.wake }); // T-P3-02：queued 漏唤醒兜底（1s 节拍）
+  registerJoinTimeoutScan({ pool, registry }); // T-P3-06：waiting_joins 的 join_deadline 超时收口
   registry.register(WS_EVENT_RETENTION_SCAN_NAME, createWsEventRetentionScan({ pool }));
   // WS hub（T-P2-10）：挂在共享 app.server 的 /ws 升级路径（DES/01 同端口）；
   // 监听前先 attach——upgrade 监听随 listen 生效，boot 测试断言 attach 顺序无要求。
@@ -179,8 +195,8 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   logger.info({ address }, 'http server listening');
 
   const stop = async (): Promise<void> => {
-    logger.info('shutting down');
     await scheduler.stop();
+    await outboundDispatcher.stop(); // 退避睡眠立即醒；在途 send 自然返回后退出（写回先行）
     try {
       const eventConsumer = await consumer;
       await eventConsumer.stop();
@@ -194,7 +210,7 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
     logger.info('shutdown complete');
   };
 
-  return { app, pool, dispatch, registry, scheduler, recovery, wsHub, consumer, stop };
+  return { app, pool, dispatch, registry, scheduler, recovery, wsHub, consumer, dispatcher: outboundDispatcher, stop };
 }
 
 // ---------- 进程入口 ----------

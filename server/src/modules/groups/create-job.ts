@@ -1,18 +1,29 @@
 // 建群 job 执行器 + 受理域逻辑（T-P3-05；DES/04 §2.1–§2.3 逐字、DES/02 §6.1 outbox）。
 // 形态：进程内执行器（受理后异步启动 / 恢复器同入口）；advisory lock `job:<jobId>` 会话级
 // 抢占（宪法 §3-5）；每个外部调用前意图先写 phase/context（E1–E4：崩溃窗口按 phase 续传）。
-// 本任务主链：create → invite → joining(并行 join) → waiting_joins(轮询 context+成员表，
-// 10s 死线由 T-P3-06 的调度器收口；此处骨架实现轮询循环) → promote → finished。
-// 异常分支（INVITE_NOT_READY 等待 / INVITE_EXPIRED 重申一次 / ALREADY_MEMBER UPSERT /
-// NOT_MEMBER_YET ≤2 / JOIN_TIMEOUT）的完整重试策略归 T-P3-06——本文件骨架按卡 b 落主路径 +
-// 断点续传形状（phase 校验点），分支失败统一 failJob(step, code)。
+// 主链：create → invite → joining(并行 join) → waiting_joins → promote → finished。
+// B2 三分支（INVITE_NOT_READY 无上限重试 / INVITE_EXPIRED 重申一次 / ALREADY_MEMBER UPSERT）、
+// JOIN_TIMEOUT 超时定位与调度器扫描体：归 create-job-branches.ts（T-P3-06）。
+// §2.4 崩溃续传：phase/context 断点恢复——waiting/joined 成员不重发 join、pending 正常发；
+// join_deadline_at 持久化不重置；promoteCalls 计数持久化累计（A2 总调用 ≤2）。
 import type { Pool, PoolClient } from 'pg';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isRecord, type GatewayClient } from '../../gateway/client.js';
 import { GatewayError } from '../../gateway/errors.js';
 import { AppError } from '../../http/plugins/errors.js';
 import { tx } from '../../db/tx.js';
-import { JOIN_TIMEOUT_MS } from '../../constants.js';
+import { JOIN_TIMEOUT_MS, PROMOTE_RETRY_WAIT_MS } from '../../constants.js';
+import {
+  escapeJsonbKey,
+  failJob,
+  firstMissingMember,
+  gatewayGroupId,
+  joinMemberWithBranches,
+  platformUserIdOf,
+  readJob,
+  type JobRow,
+} from './create-job-branches.js';
+
 /** waiting_joins 轮询节拍【设计值】（≤ member_joined 正常延迟下限，保证到齐尽快推进） */
 const WAITING_POLL_MS = 100;
 
@@ -25,23 +36,6 @@ export interface JobDeps {
   pool: Pool;
   gateway: Pick<GatewayClient, 'createGroup' | 'invite' | 'join' | 'promote'>;
   logger?: { warn(o: unknown, m?: string): void; error(o: unknown, m?: string): void };
-}
-
-interface JobRow {
-  id: string;
-  status: string;
-  phase: string;
-  payload: { creatorAccountId: string; memberAccountIds: string[] };
-  context: {
-    inviteLink?: string;
-    /** invite 返回的就绪时刻（epoch ms）：join 不得早于此（INVITE_NOT_READY 自然路径） */
-    inviteReadyAt?: number;
-    members?: Record<string, 'pending' | 'joining' | 'waiting' | 'joined'>;
-    promoteCalls?: number;
-    reinviteUsed?: boolean;
-  };
-  group_id: string | null;
-  join_deadline_at: Date | null;
 }
 
 // ---------- 受理（DES/04 §2.1） ----------
@@ -100,25 +94,6 @@ export async function acceptCreateGroup(pool: Pool, input: unknown): Promise<{ j
 
 // ---------- 执行器 ----------
 
-async function readJob(client: PoolClient, jobId: string): Promise<JobRow | null> {
-  const { rows } = await client.query<JobRow>(
-    'SELECT id, status, phase, payload, context, group_id, join_deadline_at FROM job WHERE id=$1 FOR UPDATE',
-    [jobId],
-  );
-  return rows[0] ?? null;
-}
-
-async function failJob(client: PoolClient, jobId: string, step: string, code: string): Promise<void> {
-  await client.query(
-    `UPDATE job SET status='failed', errors = errors || $2::jsonb, finished_at=now(), updated_at=now()
-     WHERE id=$1`,
-    [jobId, JSON.stringify([{ step, code }])],
-  );
-  await client.query("INSERT INTO ws_event (type, payload) VALUES ('job', $1::jsonb)", [
-    JSON.stringify({ jobId, status: 'failed' }),
-  ]);
-}
-
 /** waiting_joins 到齐判定：context.members 全 'joined'（事件路径写）则推进 */
 function allJoined(job: JobRow): boolean {
   const members = job.context.members ?? {};
@@ -149,6 +124,7 @@ export async function runCreateGroupJob(deps: JobDeps, jobId: string): Promise<v
 
 /** 相位机：每次循环读 job 最新行（各自事务内），按 phase 分派 */
 async function drive(deps: JobDeps, conn: PoolClient, jobId: string): Promise<void> {
+  void conn; // lock 持有期间驱动；相位事务走 pool（锁与会话解耦，断连即自然释放锁）
   for (;;) {
     const job = await tx(deps.pool, (c) => readJob(c, jobId));
     if (job === null || job.status !== 'running') return;
@@ -165,12 +141,12 @@ async function drive(deps: JobDeps, conn: PoolClient, jobId: string): Promise<vo
           return;
         }
         // 建群成功事务：回填 gateway id + creator 成员行（A3：无 member_joined 事件）+ phase=invite
+        const puid = await platformUserIdOf(deps.pool, payload.creatorAccountId);
         await tx(deps.pool, async (c) => {
           await c.query('UPDATE "group" SET gateway_group_id=$2, updated_at=now() WHERE id=$1', [
             job.group_id,
             groupId,
           ]);
-          const puid = await puidOf(c, payload.creatorAccountId);
           await c.query(
             `INSERT INTO group_member (group_id, account_id, platform_user_id, role, joined_at, last_event_id)
              VALUES ($1, $2, $3, 'creator', now(), 0)
@@ -209,18 +185,17 @@ async function drive(deps: JobDeps, conn: PoolClient, jobId: string): Promise<vo
         break;
       }
       case 'joining': {
-        // 意图先行：每个成员 context.members[x]='joining' 落库后才外呼 join（E3）
+        // §2.4 续传语义：waiting/joined 不重发 join（申请可能已受理）；pending/joining 正常发。
         const members = job.context.members ?? {};
         const groupGw = await gatewayGroupId(deps.pool, job.group_id);
         if (groupGw === null) return; // 群行缺映射——不应到达（create 已回填）
-        // 等 invite 就绪（readyAfterMs 契约窗口；等待在 phase 内，不转相位）
-        const readyAt = job.context.inviteReadyAt ?? 0;
-        const wait = readyAt - Date.now();
-        if (wait > 0) await sleep(wait + 10); // +10ms 时钟余量【设计值】
         const results = await Promise.all(
           payload.memberAccountIds.map(async (accountId) => {
             const state = members[accountId] ?? 'pending';
-            if (state === 'waiting' || state === 'joined') return { accountId, ok: true as const };
+            if (state === 'waiting' || state === 'joined') {
+              return { accountId, ok: true as const };
+            }
+            // 意图先行：context.members[x]='joining' 落库后才外呼 join（E3）
             await tx(deps.pool, (c) =>
               c.query(
                 `UPDATE job SET context = jsonb_set(context, '{members,${escapeJsonbKey(accountId)}}', '"joining"'), updated_at=now()
@@ -228,53 +203,29 @@ async function drive(deps: JobDeps, conn: PoolClient, jobId: string): Promise<vo
                 [jobId],
               ),
             );
-            // join 外呼（INVITE_NOT_READY 有界重试——readyAt 是契约保证，重试只兜时钟偏差）
-            for (let attempt = 0; ; attempt++) {
-              try {
-                await deps.gateway.join(groupGw, { accountId, inviteLink: job.context.inviteLink ?? '' });
-                await tx(deps.pool, (c) =>
-                  c.query(
-                    `UPDATE job SET context = jsonb_set(context, '{members,${escapeJsonbKey(accountId)}}', '"waiting"'), updated_at=now()
-                     WHERE id=$1 AND status='running'`,
-                    [jobId],
-                  ),
-                );
-                return { accountId, ok: true as const };
-              } catch (err) {
-                const code = err instanceof GatewayError ? err.code : 'INTERNAL';
-                if (code === 'INVITE_NOT_READY' && attempt < 3) {
-                  await sleep(200); // 时钟偏差兜底【设计值】；完整分支策略归 T-P3-06
-                  continue;
-                }
-                if (code === 'ALREADY_MEMBER') {
-                  // B2：视为成功 + UPSERT 成员行（§4 例外 3，D2-2——网关不推 member_joined）
-                  const puid = await puidOfPool(deps.pool, accountId);
-                  await tx(deps.pool, async (c) => {
-                    await c.query(
-                      `INSERT INTO group_member (group_id, account_id, platform_user_id, role, joined_at, last_event_id)
-                       VALUES ($1, $2, $3, 'member', now(), 0)
-                       ON CONFLICT (group_id, platform_user_id) DO NOTHING`,
-                      [job.group_id, accountId, puid],
-                    );
-                    await c.query(
-                      `UPDATE job SET context = jsonb_set(context, '{members,${escapeJsonbKey(accountId)}}', '"joined"'), updated_at=now()
-                       WHERE id=$1`,
-                      [jobId],
-                    );
-                  });
-                  return { accountId, ok: true as const };
-                }
-                return { accountId, ok: false as const, code };
-              }
-            }
+            const outcome = await joinMemberWithBranches(
+              { pool: deps.pool, gateway: deps.gateway },
+              jobId,
+              job.group_id ?? '',
+              groupGw,
+              accountId,
+              job.context.inviteLink ?? '',
+              job.context.inviteReadyAt ?? 0,
+            );
+            if (outcome.ok) return { accountId, ok: true as const };
+            return { accountId, ok: false as const, step: outcome.step, code: outcome.code };
           }),
         );
         const failed = results.find((r) => !r.ok);
         if (failed !== undefined) {
-          await tx(deps.pool, (c) => failJob(c, jobId, `join:${failed.accountId}`, failed.code ?? 'INTERNAL'));
+          // CANCELLED：job 已被外部终止（不再写终态——终态已存在）
+          if (failed.code === 'CANCELLED') return;
+          await tx(deps.pool, (c) =>
+            failJob(c, jobId, failed.step ?? `join:${failed.accountId}`, failed.code ?? 'INTERNAL'),
+          );
           return;
         }
-        // 全 waiting/joined → 进入等待相位（deadline 锚点落库；已 joined 的不重置）
+        // 全 waiting/joined → 进入等待相位（deadline 锚点落库；续传不重置——§2.4）
         await tx(deps.pool, (c) =>
           c.query(
             `UPDATE job SET phase='waiting_joins', join_deadline_at=now() + $2 * interval '1 millisecond', updated_at=now()
@@ -291,11 +242,12 @@ async function drive(deps: JobDeps, conn: PoolClient, jobId: string): Promise<vo
           );
           break;
         }
+        // A2：join_deadline_at 持久化即超时窗口（恢复不重置：原值已过即立即到点，
+        // 等价 §2.4 的 max(原值,now) 重建——执行器内不再改写该字段）
         if (job.join_deadline_at !== null && job.join_deadline_at.getTime() <= Date.now()) {
-          // A2：精确到未到的那个成员
-          const members = job.context.members ?? {};
-          const missing = payload.memberAccountIds.find((id) => members[id] !== 'joined') ?? 'unknown';
-          await tx(deps.pool, (c) => failJob(c, jobId, `join:${missing}`, 'JOIN_TIMEOUT'));
+          await tx(deps.pool, (c) =>
+            failJob(c, jobId, `join:${firstMissingMember(job)}`, 'JOIN_TIMEOUT'),
+          );
           return;
         }
         await sleep(WAITING_POLL_MS);
@@ -320,14 +272,14 @@ async function drive(deps: JobDeps, conn: PoolClient, jobId: string): Promise<vo
         } catch (err) {
           const code = err instanceof GatewayError ? err.code : 'INTERNAL';
           if (code === 'NOT_MEMBER_YET' && calls < 2) {
-            await sleep(1000); // PROMOTE_RETRY_WAIT_MS；骨架档位（T-P3-06 收口完整策略）
+            await sleep(PROMOTE_RETRY_WAIT_MS); // A2：等 1s 重试（调用总数 ≤2 由计数落库保证）
             break;
           }
           await tx(deps.pool, (c) => failJob(c, jobId, 'promote', code));
           return;
         }
-        // 成功事务：UPSERT role=admin（D2-2 兜底缺行）+ phase=done → finished
-        const puid = await puidOfPool(deps.pool, target);
+        // 成功事务：UPSERT role=admin（D2-2 兜底缺行）+ group active + finished
+        const puid = await platformUserIdOf(deps.pool, target);
         await tx(deps.pool, async (c) => {
           await c.query(
             `INSERT INTO group_member (group_id, account_id, platform_user_id, role, joined_at, last_event_id)
@@ -350,38 +302,6 @@ async function drive(deps: JobDeps, conn: PoolClient, jobId: string): Promise<vo
         return; // done/未知相位：退出
     }
   }
-}
-
-// ---------- 共享工具 ----------
-
-
-function escapeJsonbKey(key: string): string {
-  return key.replace(/[^a-zA-Z0-9_-]/g, '');
-}
-
-async function gatewayGroupId(pool: Pool, groupId: string | null): Promise<string | null> {
-  if (groupId === null) return null;
-  const { rows } = await pool.query<{ gateway_group_id: string | null }>(
-    'SELECT gateway_group_id FROM "group" WHERE id=$1',
-    [groupId],
-  );
-  return rows[0]?.gateway_group_id ?? null;
-}
-
-async function puidOf(client: PoolClient, accountId: string): Promise<string> {
-  const { rows } = await client.query<{ platform_user_id: string | null }>(
-    'SELECT platform_user_id FROM account WHERE id=$1',
-    [accountId],
-  );
-  return rows[0]?.platform_user_id ?? '';
-}
-
-async function puidOfPool(pool: Pool, accountId: string): Promise<string> {
-  const { rows } = await pool.query<{ platform_user_id: string | null }>(
-    'SELECT platform_user_id FROM account WHERE id=$1',
-    [accountId],
-  );
-  return rows[0]?.platform_user_id ?? '';
 }
 
 /** waiting_joins 的事件路径写源：member_joined 事件落成员行同时把 job.context 对应成员置 joined（同事务） */

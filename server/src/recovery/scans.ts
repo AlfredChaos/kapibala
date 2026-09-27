@@ -7,6 +7,7 @@
 import type { Pool } from 'pg';
 import { retryDeadLettersOnce } from '../events/deadletter.js';
 import { runAccountsRecoveryScan } from '../modules/accounts/transitions.js';
+import { runCreateGroupJob } from '../modules/groups/create-job.js';
 import type { DispatchRegistry } from '../events/dispatch.js';
 import type { GatewayClient } from '../gateway/client.js';
 
@@ -68,10 +69,21 @@ export const RECOVERY_SCANS: readonly RecoveryScan[] = [
   {
     // 扫描 4：job WHERE status='running'——按 phase/context 续传
     // （join/leave 不重发，查外部现状判定；DES/04）。
-    // 【扩展点：群模块 job 执行器归属任务（DES/04 §2.2/§3.2）】
+    // T-P3-06 已接线（create_group 段）：逐 job fire-and-forget 交执行器续传——
+    // advisory lock 单飞（D3-2：交接不同步等完成）；leave_all 段归 T-P3-07。
     name: 'jobs',
-    async run() {
-      return 0;
+    async run(deps) {
+      const { rows } = await deps.pool.query<{ id: string }>(
+        "SELECT id FROM job WHERE status='running' AND type='create_group'",
+      );
+      for (const row of rows) {
+        void runCreateGroupJob({ pool: deps.pool, gateway: deps.gateway, logger: deps.logger }, row.id).catch(
+          (err: unknown) => {
+            deps.logger.error({ err, jobId: row.id }, 'job resume failed; will retry on next boot');
+          },
+        );
+      }
+      return rows.length;
     },
   },
   {
