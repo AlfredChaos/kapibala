@@ -241,6 +241,14 @@
 - 踩坑：① React 18 setState updater 在 StrictMode 下被双调——updater 内放副作用（重拉）会双倍执行；副作用必须在 updater 外（ref 转发的 useWsEvent handler 每次渲染读最新 state，无闭包旧值问题）；② hashline edit 再次在嵌套回调块中间切错锚点（useWsEvent 被缝进 toggle 的 try 块）——连续三次长 PUT 错位后改用 python 整段替换；③ React 受控 textarea 需原生 value setter + input 事件（与 select 的 change 不同）。
 - VITEST 登记：A6（页面 3）应勾——00-SPEC.md 矩阵行已登记（勾选状态阶段门维护）。
 
+
+## 2026-09-28 T-P5-05 A4-1 前端半边：时间线合并 + 加载更早
+- 做了什么：`web/src/timeline/merge.ts`（L1 纯函数层——`mergeTimelineItem(map, ev)`：msgId??clientMsgId 双键定位 + 行键迁移（cm→msgId 保序同位替换，「沿用同一行」）+ deliveryStatus 只前进不倒退（秩表 queued<accepted<unknown<sent<failed/cancelled；unknown→sent 允许是 §6 表逐字行）+ 未命中 → unknownKey（载荷无全行字段不能凭空建行）；`mergeTimelinePage(map, page, 'top'|'bottom')`：已存在键 patch、新键按服务端序前置/后置、跨页重复行去重）+ `components/Timeline.tsx`（items Map 状态；首屏 GET messages?limit=50；before 游标栈——单个 nextCursor 只向前翻页；WS message→mergeTimelineItem 原地 patch / 未知键→重拉首屏窗口；own 徽标 deliveryStatus（failed/cancelled 含 failCode）；optimistic prop→queued 占位行进顶部）+ `GroupDetailPage` 接线（Timeline 挂页面；SendForm onSent 扩成 {clientMsgId,accountId,text}→optimistic 占位行，senderPlatformUserId 由成员表反查）+ `accounts-page.test.tsx` parity 改文本抽取（不再 import server 模块图）。
+- 验证命令与输出摘录：先红后绿——三处首跑红（双键定位：键迁到 msgId 后按 clientMsgId 的事件丢失→补 clientMsgId 值域回扫；桩 client 'messages' 子串吞掉 'before=cursor' 翻页请求→排序匹配前缀；无 AuthProvider 时 WS 单例没人 connect→显式 connect()）。修复后 `npx vitest run tests/timeline-merge.test.ts` → **11/11**：L1 键迁移同位不插行、倒退拒绝/unknown→sent/终态不倒退、unknownKey、双键命中；mergePage 双向+跨页去重+快照竞态不倒退；L2 首屏徽标+翻页追加不重排不重复、WS 原地 patch（行序不变）、未知键→重拉一次、failed(failCode) 徽标、optimistic 占位→WS 回填同行。全量 42/42；tsc/eslint/build 全绿。
+- 偏差与【解读】：① 「查无此行且为首屏上方新消息 → 插入顶部」实现为重拉首屏窗口 mergeTimelinePage('top')——事件载荷无 text/sentAt 等全行字段，凭空建行会撒谎，重拉是拿完整行的唯一正确通道；落在更早区间的补投行按 §5.2(b) 等翻页自然出现；② 行键迁移用 Map 保序重建（同位替换），不 delete+set（那会移到尾部）；③ 「before 游标栈」落地为单 nextCursor（只向前翻页=栈只需栈顶）；④ unknown→sent 的秩位（unknown>accepted<sent）取「存疑被消解为定论是前进」的解读——§6 表只给单侧例子，反向（sent→unknown）按「只前进」拒绝。
+- 踩坑：① **跨包 import server 源做 parity 有运行时陷阱**：transitions.ts → db/tx.js → crash.js（兄弟 WIP）会把整条服务端模块图拉进 web typecheck/运行——改为文本抽取源文件字面边表（范围收窄到 LEGAL_TRANSITIONS 块内，CONNECT_FROM 单列数组不被误吃；抽取集非空兜底断言防空表误绿）；② React 18 StrictMode 双调不只 updater——纯 mount effect 也双跑，桩 client 的 includes 匹配顺序（'before=' 必须先于 'messages'）要按特异度排序；③ tests 无 AuthProvider 时 WS 单例不会自己 connect——测试里显式 connect。
+- VITEST 登记：A4-1（web 前端半边）应勾——00-SPEC.md 矩阵行已登记（勾选状态阶段门维护）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

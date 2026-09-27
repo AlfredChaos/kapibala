@@ -10,6 +10,7 @@ import { isApiError, useAuth, canWrite } from '../auth/AuthProvider.js';
 import { AgentRunList } from '../components/AgentRunList.js';
 import { GroupMembers } from '../components/GroupMembers.js';
 import { SendForm } from '../components/SendForm.js';
+import { Timeline } from '../components/Timeline.js';
 import type { AgentRunView, GroupView } from '../lib/api-types.js';
 import { useWsEvent } from '../ws/useWsEvent.js';
 
@@ -23,6 +24,13 @@ export function GroupDetailPage(): JSX.Element {
   const { client, session } = useAuth();
   const writable = canWrite(session);
   const [group, setGroup] = useState<GroupView | null>(null);
+  // 发送乐观行（queued 占位；nonce 驱动 Timeline 的插入 effect——WS 回填沿用同一行键）
+  const [optimistic, setOptimistic] = useState<{
+    clientMsgId: string;
+    senderPlatformUserId: string;
+    text: string;
+    nonce: number;
+  } | null>(null);
   const [runs, setRuns] = useState<AgentRunView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toggleBusy, setToggleBusy] = useState(false);
@@ -160,13 +168,22 @@ export function GroupDetailPage(): JSX.Element {
             <h2>成员</h2>
             <GroupMembers members={group.members} />
           </section>
+          {/* 时间线（T-P5-05）：受理后经 optimistic prop 插 queued 占位行；
+              WS message 回填 msgId 沿用同一行键原地更新（后端一行原则前端配合面） */}
+          <Timeline groupId={group.id} client={client} optimistic={optimistic} />
           {writable && (
             <SendForm
               groupId={group.id}
               members={group.members}
               client={client}
-              onSent={() => {
-                /* 时间线归 T-P5-05；受理回执由表单内 sentId 提示 */
+              onSent={(res) => {
+                const member = group.members.find((m) => m.accountId === res.accountId);
+                setOptimistic({
+                  clientMsgId: res.clientMsgId,
+                  senderPlatformUserId: member?.platformUserId ?? res.accountId,
+                  text: res.text,
+                  nonce: Date.now(),
+                });
               }}
             />
           )}

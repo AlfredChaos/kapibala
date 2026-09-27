@@ -741,7 +741,7 @@
   d) 不做视觉打磨（负面清单）；无 any
   e) 矩阵 A6（页面 3）登记应勾
 
-### T-P5-05 时间线合并与「加载更早」            [status: TODO]
+### T-P5-05 时间线合并与「加载更早」            [status: DONE]
 - goal: 时间线组件：`items: Map<msgId ?? clientMsgId, Row>`、WS message 事件原地 patch（deliveryStatus 只前进、msgId 回填沿用同一行键）、before 游标栈、sentAt 上移不重排。
 - refs: DES/15-web-console.md §5；DES/05-messaging-module.md §5.2；REQ A4、§4 页面 3
 - owned: web/src/components/Timeline.tsx、web/src/timeline/merge.ts、web/tests/timeline-merge.test.ts

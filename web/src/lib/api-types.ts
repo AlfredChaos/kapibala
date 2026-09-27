@@ -29,3 +29,20 @@ export interface AgentRunView {
   readonly createdAt: string;
   readonly endedAt: string | null;
 }
+
+/** GET /api/groups/:id/messages 行（DES/05 §5.3 逐字） */
+export interface TimelineItem {
+  readonly msgId: string | null;
+  readonly clientMsgId: string | null;
+  readonly senderPlatformUserId: string;
+  readonly isOwn: boolean;
+  readonly text: string;
+  readonly sentAt: string;
+  readonly deliveryStatus: string | null;
+  readonly failCode: string | null;
+}
+
+export interface TimelinePage {
+  readonly items: TimelineItem[];
+  readonly nextCursor: string | null;
+}

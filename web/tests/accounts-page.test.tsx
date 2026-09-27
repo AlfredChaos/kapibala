@@ -23,10 +23,36 @@ import {
   canConnect,
   legalTargets,
 } from '../src/lib/account-transitions.js';
-import {
-  CONNECT_FROM,
-  LEGAL_TRANSITIONS,
-} from '../../server/src/modules/accounts/transitions.js';
+// 同源校验不 import 服务端模块图（transitions.ts → db/tx.js → crash.ts 会把兄弟 WIP
+// 拉进 web typecheck）——改为文本抽取 server 源文件里的字面边表，真值仍是同一文件。
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const __testdir = dirname(fileURLToPath(import.meta.url));
+const serverTransitionsSrc = readFileSync(
+  resolve(__testdir, '../../server/src/modules/accounts/transitions.ts'),
+  'utf8',
+);
+
+function extractPairs(src: string): Set<string> {
+  // 只取 LEGAL_TRANSITIONS 数组块内的 [from,to] 对（CONNECT_FROM 的 ['idle','disconnected']
+  // 是单列数组不成对，但块外可能还有别的二元字面量——先把范围收窄到表块）
+  const block = src.match(/LEGAL_TRANSITIONS[^=]*=\s*new Set\(\s*\(\s*\[([\s\S]*?)\]\s*as const/);
+  const set = new Set<string>();
+  if (block === null || block[1] === undefined) return set;
+  for (const m of block[1].matchAll(/\['([a-z_]+)',\s*'([a-z_]+)'\]/g)) {
+    set.add(`${m[1] ?? ''}->${m[2] ?? ''}`);
+  }
+  return set;
+}
+function extractConnectFrom(src: string): string[] {
+  const m = src.match(/CONNECT_FROM = \[([^\]]+)\]/);
+  if (m === null || m[1] === undefined) return [];
+  return [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1] ?? '');
+}
+const SERVER_LEGAL_TRANSITIONS = extractPairs(serverTransitionsSrc);
+const SERVER_CONNECT_FROM = extractConnectFrom(serverTransitionsSrc);
 import { getWsClient, initWsClient, resetWsClient } from '../src/ws/useWsEvent.js';
 import type { WebSocketLike } from '../src/ws/WsClient.js';
 import { isApiError } from '../src/api/client.js';
@@ -197,8 +223,10 @@ afterEach(async () => {
 
 describe('转移表同源校验（server LEGAL_TRANSITIONS === web 镜像）', () => {
   it('web 镜像与服务端表逐边一致 + CONNECT_FROM 一致', () => {
-    expect(LEGAL_TRANSITIONS_WEB).toEqual(LEGAL_TRANSITIONS);
-    expect([...CONNECT_FROM_WEB]).toEqual([...CONNECT_FROM]);
+    expect(LEGAL_TRANSITIONS_WEB).toEqual(SERVER_LEGAL_TRANSITIONS);
+    expect([...CONNECT_FROM_WEB]).toEqual(SERVER_CONNECT_FROM);
+    // 抽取非空兜底：服务端文件结构变了会让对照集为空——此时断言自身也该红（防止误绿）
+    expect(SERVER_LEGAL_TRANSITIONS.size).toBe(15);
   });
 });
 

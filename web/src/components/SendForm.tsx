@@ -13,8 +13,8 @@ export interface SendFormProps {
   /** 可选发送账号 = 本群服务账号成员（POST /send 的 accountId 必须是成员，409 ACCOUNT_NOT_IN_GROUP） */
   readonly members: GroupMemberView[];
   readonly client: ApiClient;
-  /** 发送成功回调（页面重拉时间线/列表） */
-  readonly onSent: () => void;
+  /** 发送成功回调（页面做 queued 占位行——clientMsgId 是行键，WS 回填 msgId 沿用同行） */
+  readonly onSent: (res: { clientMsgId: string; accountId: string; text: string }) => void;
 }
 
 export function SendForm(props: SendFormProps): JSX.Element {
@@ -48,8 +48,8 @@ export function SendForm(props: SendFormProps): JSX.Element {
         { method: 'POST', body: JSON.stringify({ accountId, text }) },
       );
       setSentId(res.clientMsgId);
+      props.onSent({ clientMsgId: res.clientMsgId, accountId, text });
       setText('');
-      props.onSent();
     } catch (err) {
       setError(isApiError(err) ? `${err.code}：${err.message}` : '发送失败（网络错误）');
     } finally {
