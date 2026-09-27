@@ -4,7 +4,8 @@
 // kick / leave / send / members / by-client-id 归 T-P1-04，不在本文件。
 import type { FastifyInstance } from 'fastify';
 import { assertAccountOperationAllowed, assertConnectAllowed, type AccountGateError } from './accounts.js';
-import { appendLedger, type GatewayState, type SwitchConfig } from './state.js';
+import { appendLedger, type GatewayState } from './state.js';
+import { activeSwitch, readNumberParam } from './switches.js';
 
 // —— 契约时序（QR §1 / REQ §2.1）；mock 自己持有（mock 不依赖 server 的 constants.ts）——
 /** join 受理后 member_joined 通常 100–1500ms 到达（REQ §2.1；QR §1） */
@@ -16,37 +17,6 @@ const INVITE_READY_SLOW_MAX_MS = 5000;
 
 function randomBetween(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
-}
-
-/**
- * 开关是否命中：无 target = 全局；有 target 时，配置侧声明的每个 target 键都必须命中
- * （配置只写 groupId 时，带 accountId 的探查也算命中——「按群钉死」覆盖到该群全部账号）。
- * 返回命中的配置（含 params），供钉值读取。
- */
-function activeSwitch(
-  state: GatewayState,
-  switchName: string,
-  target?: { groupId?: string; accountId?: string },
-): SwitchConfig | undefined {
-  const config = state.switches.get(switchName);
-  if (config === undefined) {
-    return undefined;
-  }
-  if (target === undefined || config.target === undefined) {
-    return config;
-  }
-  for (const [key, value] of Object.entries(config.target)) {
-    const probed = key === 'groupId' ? target.groupId : key === 'accountId' ? target.accountId : undefined;
-    if (probed !== value) {
-      return undefined;
-    }
-  }
-  return config;
-}
-
-function readNumberParam(config: SwitchConfig | undefined, key: string): number | undefined {
-  const value = config?.params?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function sendGateError(reply: { code: (s: number) => { send: (b: unknown) => unknown } }, gate: AccountGateError) {

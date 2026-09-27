@@ -3,6 +3,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { registerAccountRoutes } from './accounts.js';
 import { registerSseRoutes } from './sse.js';
 import { registerGroupRoutes } from './groups.js';
+import { registerMediaRoutes } from './media.js';
+import { registerMessagingRoutes } from './messaging.js';
 import { registerTestPlane } from './test-plane.js';
 import { createGatewayState, DEFAULT_SEED_ACCOUNTS, type GatewayState } from './state.js';
 
@@ -40,5 +42,7 @@ export function createGatewayApp(options: GatewayAppOptions = {}): GatewayApp {
   // SSE 推送器（T-P1-02；最小 wiring 适配：路由注册必须在工厂内落地）
   registerSseRoutes(app, state);
   registerGroupRoutes(app, state); // T-P1-03（最小 wiring 适配）
+  registerMessagingRoutes(app, state); // T-P1-04（最小 wiring 适配）
+  registerMediaRoutes(app); // T-P1-04（最小 wiring 适配）
   return app;
 }
