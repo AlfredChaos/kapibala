@@ -18,10 +18,11 @@ export async function registerGroupsSendRoutes(app: App, deps: RouteDeps): Promi
     if (typeof text !== 'string') {
       throw new AppError('VALIDATION_ERROR', 'text must be a string');
     }
-    const { clientMsgId } = await acceptOperatorMessage({ pool: deps.pool }, id, {
-      accountId,
-      text,
-    });
+    const { clientMsgId } = await acceptOperatorMessage(
+      { pool: deps.pool, onAccepted: deps.onMessageAccepted },
+      id,
+      { accountId, text },
+    );
     // 202：受理即落库（先持久化后返回，DES/05 §2.3-1）
     return reply.status(202).send({ clientMsgId });
   });

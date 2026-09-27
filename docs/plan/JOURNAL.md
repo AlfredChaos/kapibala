@@ -164,6 +164,15 @@
 - 踩坑：无。
 - VITEST 登记：A-09、G-16（受理半边）应勾——按 SP-6 规则登记于此。
 
+---
+
+## 2026-09-28 T-P3-02 出站 dispatcher + 同步错误八向分流
+- 做了什么：`modules/messages/dispatcher.ts`（startOutboundDispatcher：每账号 pump + `pg_try_advisory_lock(hashtext('outbound-dispatcher'), hashtext(accountId))` 会话锁；wake 驱动 + needsRerun 补跑；硬闸门 checkRateLimit 最外层；claimAttempt 落 first_attempt_at 先于 send（E7/I1）；503/裸网络异常泵内指数退避环——常量 SEND_RETRY_BACKOFF_*；八向分流逐字 §2.3）；`scheduler/dispatch-wakeup.ts`（每秒扫 queued&NULL-attempt 账号 → wake，漏唤醒兜底）；index.ts 三处接线（dispatcher 先于 buildApp、onMessageAccepted 入路由、rate-limit 到期 wakeDispatcher + dispatch-wakeup 注册行、stop 顺序）；RouteDeps/app.ts/groups-send.ts 的 onAccepted 透传。
+- 验证命令与输出摘录：**先红后绿**——测试先行红（模块不存在），实现后 `npx vitest run tests/messages/outbound-dispatcher.test.ts` → **9/9**；scoped `vitest run tests/messages/ tests/boot-order.test.ts tests/constants.test.ts tests/events/` → 116 passed / 9 文件；tsc/eslint 我触面 clean（leave-all.ts 两处报错 = 兄弟 T-P3-08 WIP）。断言点：429 期内 `sendCallsByAccount===1`（S4 零试探）+ 到期顺延不跳过、503 重试 clientMsgId 不变 resend_count=0 first_attempt_at 不重置、enterTerminal 副作用帧（account_terminal/account_status_changed/cancelled message 帧）、GWF 级联单事务（group unreachable + running sequence_run→stopped + sequence_run 帧）、504→unknown(deadline=since+5000)。
+- 偏差与【解读】：① **429/裸异常复位 first_attempt_at=NULL**——E7「落库=结果未知」不适用「确认未发出」的 429；复位让行保持可拾取且崩溃扫描不误转 unknown（A2）。② 503 重试在泵内进行（锁保持）：spec 无数字给节奏，沿用 SSE 退避档 500ms→5s；不重入 DB 行（resend_count/first_attempt_at 语义逐字 #17）。③ 群无 gateway_group_id（creating）时复位 first_attempt_at 并停泵——不把「建群未完成」当成网关失败。④ 未分类错误码（INVALID_RESPONSE/INTERNAL/NOT_FOUND/其余业务码）兜底走 unknown 而非 failed——宁保守不盲发。⑤ gw-16 sender_not_in_group 按 (group,account,clientMsgId) 定向只拦 m1，m2 照常（队列不阻断断言由此而来）。⑥ mock `counters` 在路由内增计——503 前置拦截不计数，重试断言只能用我方包装层 sendCalls。
+- 踩坑：① **兄弟提交扫带未跟踪文件**：impl-a3 的 T-P3-06 commit (1778b09) 把我在 worktree 中未暂存的 index.ts dispatcher 接线一并提交，HEAD 树曾短暂悬空引用（commit 内 import → 未入库文件）；本次提交落库后恢复自洽。教训：并发 lane-A 下共享文件 index.ts 需 staged-only 习惯。② hashline 工具在密集同形段落（多个 `rows[0]`/`return`)易误锚——用「范围精确覆盖 + 不重述下界」规避。
+- VITEST 登记：A2-1/7/8/10、G-13/14、gw-15/16/17/10（测试侧）应勾——按 SP-6 规则登记于此。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

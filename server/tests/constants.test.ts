@@ -68,6 +68,8 @@ const DESIGN_TABLE: ReadonlyArray<readonly [keyof typeof C, number | boolean]> =
   ['TRIGGER_SWEEP_INTERVAL_MS', 5000], // DES/06 §2
   ['REFRESH_TOKEN_TTL_MS', 604800000], // DES/02 §2.3 / 声明 #23（7d）
   ['PENDING_EVENT_RETENTION_DAYS', 7], // DES/02 §1.4（done 行保留 7 天）
+  ['SEND_RETRY_BACKOFF_START_MS', 500], // DES/05 §2.3 解读 #17（节奏沿用 SSE 退避档）
+  ['SEND_RETRY_BACKOFF_MAX_MS', 5000], // DES/05 §2.3 解读 #17
 ];
 
 describe('I14 · QR §1 契约数字逐字断言', () => {
@@ -85,8 +87,8 @@ describe('设计值常量逐个断言（【设计值】+ 出处）', () => {
     expect(C[key]).toBe(value);
   });
 
-  it('常量总数守恒：29 契约 + 28 设计 = 57，禁止静默增删', () => {
-    expect(Object.keys(C)).toHaveLength(57);
-    expect(DESIGN_TABLE).toHaveLength(28);
+  it('常量总数守恒：29 契约 + 30 设计 = 59，禁止静默增删', () => {
+    expect(Object.keys(C)).toHaveLength(59);
+    expect(DESIGN_TABLE).toHaveLength(30);
   });
 });

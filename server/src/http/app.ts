@@ -27,6 +27,8 @@ export interface BuildAppOptions {
   pool: Pool;
   /** 注入日志器（测试捕获流用）；缺省 = pino() 默认 JSON 行日志（stdout） */
   logger?: Logger;
+  /** T-P3-02：send 受理（202）后唤醒出站 dispatcher 的缝（accept.onAccepted）；缺省 = DB 扫描兜底 */
+  onMessageAccepted?: (accountId: string) => void;
   /** T-P0-07 落地后由认证模块注入；缺省 = stub（一切 token 401，守卫不可绕过） */
   verifyAccessToken?: VerifyAccessToken;
   /** T-P2-05 起账号域路由需要；缺省 = stub（一切调用 503，与「网关未接线」语义一致） */
@@ -49,6 +51,10 @@ export async function buildApp(options: BuildAppOptions): Promise<App> {
   await applyRequestId(app);
   await applyErrorMapping(app);
   await applyAuthGuard(app, { verifyAccessToken: options.verifyAccessToken ?? stubVerifyAccessToken });
-  await registerRoutes(app, { pool: options.pool, gateway: options.gateway ?? stubGatewayClient });
+  await registerRoutes(app, {
+    pool: options.pool,
+    gateway: options.gateway ?? stubGatewayClient,
+    onMessageAccepted: options.onMessageAccepted,
+  });
   return app;
 }

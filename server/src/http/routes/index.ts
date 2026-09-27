@@ -15,6 +15,8 @@ export interface RouteDeps {
   pool: Pool;
   /** T-P2-05 起账号域 connect/transition 需要（connect 先调网关；disconnect 补偿调用） */
   gateway: GatewayClient;
+  /** T-P3-02：send 受理（202）后唤醒出站 dispatcher 的缝（accept.onAccepted）；缺省 = DB 扫描兜底 */
+  onMessageAccepted?: (accountId: string) => void;
 }
 
 export async function registerRoutes(app: App, deps: RouteDeps): Promise<void> {
