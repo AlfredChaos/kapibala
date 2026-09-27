@@ -10,6 +10,7 @@ import {
   type TurnRequest,
 } from '@kapibala/contract';
 import { createScriptedProvider, type AgentProvider, type ProviderReply } from './providers/scripted.js';
+import { createAnthropicProviderFromEnv } from './providers/anthropic.js';
 import { createAgentState, registerTestEndpoints, type AgentState } from './scenario.js';
 
 export type AgentMode = 'scripted' | 'anthropic';
@@ -25,18 +26,19 @@ export interface AgentAppOptions {
 
 /**
  * 解析 provider（DES/12 §2 单 HTTP 层双 provider）。
- * anthropic（C2）未实现：无 key → 拒起（env 未配置）；有 key → 仍拒起（实现归后续 C2 任务）——
- * 装配期炸掉好于起一台静默退化到 scripted 的假真实服务。
+ * scripted = 确定性默认；anthropic = 真实 LLM（C2，@anthropic-ai/sdk 透传）。
+ * 装配期拒起的情况（好于静默退化）：未知 mode / anthropic 无 key。
  */
 function resolveProvider(mode: string, state: AgentState): AgentProvider {
   if (mode === 'scripted') {
     return createScriptedProvider(state);
   }
   if (mode === 'anthropic') {
-    if (process.env['ANTHROPIC_API_KEY'] === undefined || process.env['ANTHROPIC_API_KEY'] === '') {
-      throw new Error('AGENT_MODE=anthropic requires ANTHROPIC_API_KEY (DES/12 §6; C2 lands in a later task)');
+    const apiKey = process.env['ANTHROPIC_API_KEY'];
+    if (apiKey === undefined || apiKey === '') {
+      throw new Error('AGENT_MODE=anthropic requires ANTHROPIC_API_KEY (DES/12 §6; key must come from local .env, never committed)');
     }
-    throw new Error('AGENT_MODE=anthropic provider is not implemented yet (DES/12 §4; C2 lands in a later task)');
+    return createAnthropicProviderFromEnv({ apiKey });
   }
   throw new Error(`unknown AGENT_MODE: ${JSON.stringify(mode)} (expected scripted|anthropic)`);
 }

@@ -10,6 +10,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@kapibala/contract": "workspace:*",
     "fastify": "^5.12.5"
   }

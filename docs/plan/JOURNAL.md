@@ -200,6 +200,15 @@
 - 踩坑：① **`media/` 会真实落 server 包目录**（cwd=server）——E2E 后需清或靠 .gitignore；mock 的 `attachMedia` 只在落地时刻判定，arm `media_message` 必须在 send 之前。② own-回流 merge 分支会吞 media_url（T-P2-08 遗留缺口）——C1 对此类消息曾经完全不可达；同一 bug 也在外部消息 dup/补投路径下没事（INSERT 本就带 media_url）。③ 直插 `message` 行的测试要先插 account（FK `group.creator_account_id`）。
 - VITEST 登记：C1、gw-27（测试侧）应勾——按 SP-6 规则登记于此。
 
+---
+
+## 2026-09-28 T-P8-02 C2：anthropic provider
+- 做了什么：`mock-agent/src/providers/anthropic.ts`（@anthropic-ai/sdk 透传 + 进出形状映射：`AnthropicLike` 鸭子类型注入式 client → 测试零网络；请求方向 tools/messages 近同构透传；`mapTurnResponse` 多块取首个 tool_use/text + 恰一块 + stop_reason 由块类型裁定；SDK 未知 stop_reason/无效块 → end_turn+text 兜底；audit 走 judge prompt——只收 {verdict:pass|fail,reason} JSON（容忍 ```json fence），解析失败/非约定值/SDK 抛错 → raw 500「无结论」契约形态；`createAnthropicProviderFromEnv` 静态装配真 SDK，`LLM_MODEL` 可配默认 claude-sonnet-4-5）+ `app.ts` resolveProvider 接线（anthropic+key → 真 provider；无 key 仍拒起）+ `.env.example` 双实例部署说明（A=scripted:4200 / B=anthropic:4300，AGENT_URL 单变量切换）。
+- 验证命令与输出摘录：**先红后绿**——模块不存在时测试全红；实现后 `npx vitest run tests/anthropic-shape.test.ts` → **11/11**（请求形状/model 透传、多块取首、stop_reason 一致性四个方向、兜底块、audit 六种输出形态、SDK 抛错 → 500、无 key 拒起、有 key 装配）；mock-agent 全量 57/57；真冒烟 `AGENT_MODE=anthropic ANTHROPIC_API_KEY=sk-ant-dummy PORT=4300 tsx src/index.ts` → **监听 :4300 成功**（SDK 构造不验 key，运行时失败走 500 契约路径）。
+- 偏差与【解读】：① `stop_reason 一致` 的解读：块类型与 stop_reason 互相印证而非照搬——SDK 报 end_turn 但首块是 tool_use → tool_use（信块）；SDK 未知值 → end_turn+text 兜底（§4「其余映射为 end_turn + text 兜底块」逐字）。② judge 输出容忍 markdown fence 包装（真实 LLM 高频形态）——剥壳后严格 JSON.parse；verdict 非法值（'maybe'）/缺 reason/非对象 → 500，绝不放行「半对」形状。③ 无 key 时真实 LLM 链路以纯函数形状测试 + 装配冒烟演示——卡片 e 明示的路径；503/超时等运行形态由 server 侧既有契约测试覆盖（agentclient 层已有 fake client）。④ turn 失败也返回 500 而非抛出——HTTP 层对「无结论」故障形态的统一表达。
+- 踩坑：① 兄弟遗留测试断言「有 key 也拒起」（T-P4-02 埋的 TODO 语义）——provider 落地后契约语义翻转，用例同步更新而非删除。② `pnpm add @anthropic-ai/sdk` 后需 `--no-frozen-lockfile` 的坑在 pnpm-lock 已含 workspace:* 变更时成立——本卡直接成功（deps 变更是本次工作的合法部分）。③ hashline 工具两次把 edit 锚到错误函数区（`addGroup` 重复定义 / import 块错位）——密集同形段下必须逐次回读，不能连发。
+- VITEST 登记：C2、A-21（AGENT_URL 切换）应勾——按 SP-6 规则登记于此。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…

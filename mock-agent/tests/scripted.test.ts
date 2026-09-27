@@ -246,11 +246,13 @@ describe('AGENT_MODE provider 选择（DES/12 §2/§6：anthropic=C2 槽位，�
     }
   });
 
-  it('AGENT_MODE=anthropic 即使有 key → 也拒绝（provider 未实现，C2 归后续任务）', () => {
+  it('AGENT_MODE=anthropic 且有 key → 装配真实 provider（不发请求；C2 已落地，T-P8-02）', async () => {
     try {
       process.env['AGENT_MODE'] = 'anthropic';
       process.env['ANTHROPIC_API_KEY'] = 'sk-test';
-      expect(() => createAgentApp()).toThrow(/anthropic/);
+      const app = createAgentApp();
+      expect(app).toBeDefined();
+      await app.close();
     } finally {
       restoreEnv();
     }
