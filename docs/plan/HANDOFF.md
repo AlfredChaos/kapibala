@@ -53,7 +53,7 @@
 | server 全量测试 flake | 开放·已知 | 资源争用型（各轮挂的文件不同、孤立跑全绿、maxWorkers:4 后三轮终验一轮全绿）；如再发按「孤立重跑判性」流程确认非新红 |
 | C2 真实 LLM | 需自配 | 通道/映射实装且绿（mock 单测 + e2e scripted）；ANTHROPIC_API_KEY 需使用者自备，后端只改 `AGENT_URL` |
 | C3 e2e 竞态 | 已消解 | state 文件生命周期归 backend 自理（启动删旧 + ready 最后写）；连跑多轮绿 |
-| R-A/R-B 回写验证未收口 | 开放 | 进入 T-P2-09 / T-P4-04 前先复核设计文档定稿语义（任务卡已按定稿语义写） |
+| R-A/R-B 回写验证未收口 | 已消解 | T-P7-05 审计收口：VITEST_PLAN D2-1 扩展行与 R-B 回归行已勾选，全量套件绿（commit 22397f6） |
 | lane-C（mock-agent）正式排在 P4 但 DAG 只依赖 T-P0-02 | 已利用 | lane-A 阻塞时提前拉起 T-P4-01..03（不违反阶段依赖：它们不消费 server） |
 | 共享文件竞态（index.ts/dispatch.ts/registry.ts/routes/index.ts/VITEST_PLAN/根 package.json） | 已消解 | §0 规则 1/2/3/7：依赖边串行化 + 阶段门统一勾选 + 脚本预注册 |
 | AGENTS.md 命令漂移 | 已消解 | T-P0-01 初核对、T-P8-04 终同步，域任务只核对不改 |
