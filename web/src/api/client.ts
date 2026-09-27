@@ -39,6 +39,8 @@ export interface ClientDeps {
 
 export interface ApiClient {
   request<T>(path: string, init?: RequestInit): Promise<T>;
+  /** §4 单飞续期（WS auth 失败路径也走它——与 401 拦截共享同一 promise，绝不双发） */
+  refreshToken(): Promise<string>;
   /** 仅供测试/调试：当前是否有进行中的 refresh（单飞观测点） */
   refreshInFlight(): boolean;
 }
@@ -125,6 +127,7 @@ export function createApiClient(deps: ClientDeps): ApiClient {
 
   return {
     request,
+    refreshToken: refreshOnce,
     refreshInFlight: () => refreshing !== null,
   };
 }

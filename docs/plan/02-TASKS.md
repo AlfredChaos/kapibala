@@ -702,7 +702,7 @@
   d) 不存 refresh 到 JS 可读存储（R-E）；不引 axios/Redux；无 any
   e) 无 VITEST 行；矩阵 A6/B3-4（前端半边）登记应勾
 
-### T-P5-02 WS 客户端（seq 去重 / 退避 / sinceSeq）            [status: TODO]
+### T-P5-02 WS 客户端（seq 去重 / 退避 / sinceSeq）            [status: DONE]
 - goal: `WsClient` 单例（auth 帧 → success 回执后实时模式、frame.seq ≤ lastSeq 丢弃、close 指数退避 500ms×2 封顶 5s、lastSeq 持久化 sessionStorage）+ `useWsEvent(type, handler)` + inconsistency 全局 toast 与 `ws_backlog_expired` 全量 refetch。
 - refs: DES/15-web-console.md §3；DES/08-realtime-module.md §2；REQ B4
 - owned: web/src/ws/WsClient.ts、web/src/ws/useWsEvent.ts、web/tests/ws-client.test.ts

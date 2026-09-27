@@ -9,6 +9,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -28,6 +29,7 @@ import {
   persistSession,
   restoreSession,
 } from '../api/auth.js';
+import { getWsClient, initWsClient } from '../ws/useWsEvent.js';
 
 export interface AuthState {
   /** null = 未登录/会话已失效 */
@@ -102,6 +104,25 @@ export function AuthProvider(props: { children: ReactNode }): JSX.Element {
       setSession(null);
     }
   }, [client]);
+
+  // WS 单例装配（T-P5-02；DES/15 §3）：token/refresh 全走 §4 client——
+  // session 为 null 时断开（logout/expire 即断）；token 轮换（onRefreshed）
+  // 不重建连接（§2.4：连接期不续验，断了才走 sinceSeq 重连）——dep 是布尔不是对象
+  const hasSession = session !== null;
+  useEffect(() => {
+    if (!hasSession) {
+      getWsClient()?.disconnect();
+      return undefined;
+    }
+    const ws = initWsClient({
+      tokens: {
+        getAccessToken: () => sessionRef.current?.accessToken ?? null,
+        refreshToken: () => client.refreshToken(),
+      },
+    });
+    ws.connect();
+    return () => ws.disconnect();
+  }, [hasSession, client]);
 
   const value = useMemo<AuthState>(
     () => ({ session, client, login, logout, expireSession }),

@@ -217,6 +217,14 @@
 - 踩坑：① 登录失败的 401 必须先单飞通道豁免（`/api/auth/` 前缀短路）——否则 login 的 UNAUTHORIZED 会被 refresh 流程吞掉、页面看到 HTTP_404 而非密码错误；这是「401→refresh」拦截器的第一条业务语义边界。② hashline edit 工具多次锚错位（AuthProvider/LoginPage/client.ts 各一次）——小文件直接 rewrite 更稳。
 - VITEST 登记：B3-4（web 层 2）、A6 页面 1 部分应勾——00-SPEC.md 行已登记（勾选状态阶段门维护）。
 
+
+## 2026-09-28 T-P5-02 B4-1 前端半边：WS 客户端（seq 去重 / 退避 / sinceSeq）
+- 做了什么：`web/src/ws/WsClient.ts`（createWsClient 单例工厂：open 即发 {type:'auth', accessToken, sinceSeq:lastSeq}（DES/15 §3 伪码逐字——恒带 sinceSeq，旧 seq 补发换不漏，重复靠 seq 去重）；auth:true → authed + 退避清零；auth:false → §4 client.refreshToken() 单飞 → 成功后立即重连（不叠加退避通道，authRetrying 闸）→ 刷新也 401 由 client 层 onSessionExpired 收口不再重连；close → nextBackoff(attempt)=500×2^attempt 封顶 5s 重连；applyFrame(lastSeq, frame) 纯函数：seq<=lastSeq 丢弃否则推进；先 persistSeq(sessionStorage) 后 dispatch——刷新最坏重放不丢；stale-socket 残余帧 socket!==ws 守卫不消费；handler 抛错 warn 后继续——帧是服务端已提交真值不杀死连接；subscribe(type) 收窄只发生在订阅边界（Map 键保证），onBacklogExpired 独立收口 ws_backlog_expired；wsFactory/url/storage/退避参数/token 源全注入）+ `useWsEvent.ts`（initWsClient 幂等装配 + getWsClient + useWsEvent hook：ref 转发 handler 换引用不重订、unmount 退订、未装配空转防御）+ `api/client.ts` ApiClient.refreshToken() 公开（与 401 拦截共享同一单飞 promise）+ `AuthProvider` 装配：hasSession 布尔 dep（token 轮换不重建连接——§2.4 连接期不续验）、session null → disconnect。
+- 验证命令与输出摘录：先红后绿——文件不存在时 import 全红；实现后 `cd web && npx vitest run tests/ws-client.test.ts` → **10/10**：L1 applyFrame（9<=10 丢、10<=10 丢、11/99 推进跳号也单调）+ L1 nextBackoff（[500,1000,2000,4000,5000,5000,5000] 逐字序列）+ L2 open 发 auth 帧（type:'auth', accessToken, sinceSeq:0）→ authed + close→2ms 退避重连 auth 帧带 sinceSeq=5 + auth:false→refresh 恰好一次→重连带轮换 token t-2 + 交叠帧 [1,2,2,1,3]→seen [1,2,3] 不重复 + lastSeq 持久化（新实例 sinceSeq=7）+ disconnect 后不重连不收帧 + ws_backlog_expired→onBacklogExpired 恰好一次 + useWsEvent 挂载收帧/卸载停收/重渲染不重订；全量 17/17；tsc（含 tests）+eslint+vite build 全绿。
+- 偏差与【解读】：① 「auth 失败→走 §4 刷新后重连」中「重连」解读为刷新成功立即重连零退避（不滥用退避序列——attempt 保留不清零，刷新本身可能连失败）；② useWsEvent 通过模块单例 initWsClient 装配而非 props——DES/15 §3 明示「WsClient 单例，模块级」；③ singleton 未装配时 useWsEvent 空转（守卫已挡页面，hook 不炸防御性兜底）；④ subscribe 存储层抹掉收窄、边界处一次性断言——避免判别联合 handler 逆变的双重断言噪音，唯一不安全点在 Map 键保证处。
+- 踩坑：① hashline edit 连续锚错位（onmessage 块内 else 分支被截断拼接）——闭合括号密集段必须逐次回读；② disconnect 后 stale socket 的 onmessage 仍会触发（fake 是直推）——socket!==ws 守卫补上真实 socket「close 后不再投」语义；③ ESLint no-non-null-assertion 在测试文件同样生效——socketAt(i) 抛错助手替代 !。
+- VITEST 登记：B4-1（web 层 1+2）应勾——00-SPEC.md 矩阵行已登记（勾选状态阶段门维护）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
