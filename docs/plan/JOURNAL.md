@@ -41,6 +41,12 @@
 - 偏差与【解读】：(a) 卡 owned 之外新增 7 个可启动 dev 的占位文件（`server/src/index.ts`、`web/index.html` + `vite.config.ts` + `src/*`、mock 存根）——编排者 brief 明确授权；(b) Docker Hub 不可达 → 经 docker.m.daocloud.io 镜像拉取 postgres:16 后本地 retag，compose 文件未动——全新机器需可访问 Docker Hub；(c) `pnpm-lock.yaml` 一并提交（卡 owned 未列）——随 manifest 所有者提交（既定规则）；(d) 审查 info 级发现两项随本轮收口提交：`@types/node` 钉到 `^22`（对齐 engines floor）、各包 tsconfig `include` 扩宽为 `["src", "tests", "vitest.config.ts"]`（`rootDir` 相应改包根——include 越出 src 后 `tsc` 与 `tsc --noEmit` 均报 TS6059；dist 布局变 `dist/src/**`，dev 走 tsx 不受影响）。
 - 踩坑：`docker compose up` 拉镜像超时失败的根因是本机网络到 registry-1.docker.io（Docker Hub）不可达，而非 compose 配置问题——绕法：`docker pull docker.m.daocloud.io/library/postgres:16` 后 `docker tag` 为 `postgres:16`。
 
+## 2026-09-27 T-P0-02 follow-up（vitest config + 测试排除 emit）
+- 做了什么：按 T-P0-02 审查发现补齐 contract 包测试基建——`package.json` 增 `"test": "vitest run"`（对齐兄弟包脚本形状）；新增 `vitest.config.ts`（include 限定 `src/**/*.test.ts`，仿 mock-agent 样式）；`tsconfig.json` 增 `"exclude": ["src/__tests__"]`，并删除 dist 中已误出的测试副本。
+- 验证命令与输出摘录：`pnpm -F @kapibala/contract build` → dist 仅 5 个源码模块（.js/.d.ts），无 `__tests__`；`pnpm -F @kapibala/contract test` → Test Files 1 passed / Tests 6 passed（仅 src 一份，不再执行 dist 副本）；`pnpm typecheck` → 0 错。
+- 偏差与【解读】：tsconfig `exclude` 收缩编译输入集——`src/__tests__/shapes.test.ts` 因此不再进 `tsc` 程序，其**编译期**穷尽性断言（`Record<X, true>`）暂不被根 typecheck 执行，**运行时**常量数组断言在 vitest 下仍然生效；单 tsconfig 无法同时「测试参与 typecheck + 不参与 emit」，如需完整编译期断言，后续以测试专用 tsconfig 分离收口（回 T-P0-02 串行变更）。
+- 踩坑：tsc 不清理旧产物——排除测试后已存在的 `dist/__tests__/` 仍残留，须手动删除后重建才能验证干净 emit。
+
 ---
 
 <!-- 后续任务条目按上述格式在此追加。示例：
