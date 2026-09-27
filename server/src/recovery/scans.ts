@@ -5,6 +5,7 @@
 // 插入时保持本清单顺序不变（boot-order.test.ts 钉死名单与次序）。
 // 宪法 §3-5：扫描体必须全部条件更新、可重复触发（幂等吸收）——本骨架不含任何进程内正确性判定。
 import { recoverAgentRuns } from '../modules/agent/recovery.js';
+import { recoverSequenceRuns } from '../modules/sequences/recovery.js';
 import type { Pool } from 'pg';
 import { retryDeadLettersOnce } from '../events/deadletter.js';
 import { runAccountsRecoveryScan } from '../modules/accounts/transitions.js';
@@ -82,10 +83,10 @@ export const RECOVERY_SCANS: readonly RecoveryScan[] = [
     // 扫描 3：sequence_run WHERE status='running'——链头判定四分支：在途消息→等落定；
     // 未排期→等前驱；过期未创建→只重排链头（now+delay，其后全部 scheduled_at=NULL）；
     // 未到期→保持（DES/07 §5）。
-    // 【扩展点：T-P6-04（序列段充实，共享串行文件）】
+    // 【扩展点：T-P6-04（序列段充实，共享串行文件）】已接线
     name: 'sequence-runs',
-    async run() {
-      return 0;
+    async run(deps) {
+      return recoverSequenceRuns({ pool: deps.pool });
     },
   },
   {
