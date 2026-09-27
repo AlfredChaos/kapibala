@@ -13,14 +13,7 @@ import { loadConfig } from '../../src/config/index.js';
 import { boot } from '../../src/index.js';
 import { seed } from '../../src/db/seed.js';
 import { getTestDb } from '../helpers/db.js';
-import {
-  authed,
-  emitEvent,
-  patchGroup,
-  setupGroup,
-  waitFor,
-  type ScenarioEnv,
-} from '../helpers/env.js';
+import { emitEvent, patchGroup, setupGroup, waitFor, type ScenarioEnv } from '../helpers/env.js';
 import { createGatewayApp } from '../../../mock-gateway/src/app.js';
 import { createAgentApp } from '../../../mock-agent/src/app.js';
 
