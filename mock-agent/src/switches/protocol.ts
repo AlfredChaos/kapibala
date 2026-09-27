@@ -7,7 +7,7 @@ import type { AgentState, AgentSwitchConfig, PlaybookStep } from '../scenario.js
 import type { ProviderReply } from '../providers/scripted.js';
 
 /** 开关是否命中本次 turn：target.runId 缺省 = 全局；声明了 runId 则必须同值 */
-export function protocolSwitch(
+export function matchingSwitch(
   state: AgentState,
   switchName: string,
   runId: string,
@@ -71,16 +71,16 @@ export const S6_SEQUENCE_STEPS: readonly PlaybookStep[] = [
  * 校验在 HTTP 层无条件执行（app.ts），开关只作登记（探针存在 = 后端测试意图）。
  */
 export function applyProtocolFault(state: AgentState, runId: string): ProviderReply | undefined {
-  if (protocolSwitch(state, 'bad_json_raw', runId) !== undefined) {
+  if (matchingSwitch(state, 'bad_json_raw', runId) !== undefined) {
     return { kind: 'raw', body: BAD_JSON_RAW_BODY };
   }
-  if (protocolSwitch(state, 'bad_json_fenced', runId) !== undefined) {
+  if (matchingSwitch(state, 'bad_json_fenced', runId) !== undefined) {
     return { kind: 'raw', body: BAD_JSON_FENCED_BODY };
   }
-  if (protocolSwitch(state, 'bad_json_wrapped', runId) !== undefined) {
+  if (matchingSwitch(state, 'bad_json_wrapped', runId) !== undefined) {
     return { kind: 'raw', body: BAD_JSON_WRAPPED_BODY };
   }
-  const shapeConfig = protocolSwitch(state, 'shape_invalid', runId);
+  const shapeConfig = matchingSwitch(state, 'shape_invalid', runId);
   if (shapeConfig !== undefined) {
     const variant = readString(shapeConfig, 'variant') ?? 'no_stop_reason';
     const body =
@@ -91,12 +91,12 @@ export function applyProtocolFault(state: AgentState, runId: string): ProviderRe
           : SHAPE_NO_STOP_REASON;
     return { kind: 'raw', body };
   }
-  const unknownTool = protocolSwitch(state, 'unknown_tool', runId);
+  const unknownTool = matchingSwitch(state, 'unknown_tool', runId);
   if (unknownTool !== undefined) {
     const name = readString(unknownTool, 'name') ?? 'nonexistent_tool';
     return toolUse(state, name, {});
   }
-  const invalidInput = protocolSwitch(state, 'invalid_input', runId);
+  const invalidInput = matchingSwitch(state, 'invalid_input', runId);
   if (invalidInput !== undefined) {
     const name = readString(invalidInput, 'name') ?? 'get_recent_messages';
     const input =
@@ -105,7 +105,7 @@ export function applyProtocolFault(state: AgentState, runId: string): ProviderRe
         : { limit: 'not-a-number' }; // limit 应为 number → INVALID_INPUT
     return toolUse(state, name, input);
   }
-  const dup = protocolSwitch(state, 'duplicate_tool_use_id', runId);
+  const dup = matchingSwitch(state, 'duplicate_tool_use_id', runId);
   if (dup !== undefined) {
     const id = readString(dup, 'id') ?? DEFAULT_DUP_TOOL_USE_ID;
     // 不走 nextToolUseId：恒同 id 正是注入点（合法重试用新 id，REQ §2.2）

@@ -125,7 +125,7 @@ export function createAgentApp(options: AgentAppOptions = {}): AgentApp {
       tools: body['tools'] as ToolDefinition[],
       messages: body['messages'] as TurnRequest['messages'],
     };
-    sendProviderReply(reply, provider.turn(turnRequest));
+    sendProviderReply(reply, await provider.turn(turnRequest));
   });
 
   app.post('/agent/audit', async (request, reply) => {
@@ -133,7 +133,7 @@ export function createAgentApp(options: AgentAppOptions = {}): AgentApp {
     if (typeof body['text'] !== 'string' || typeof body['groupId'] !== 'string') {
       return reply.code(400).send({ message: 'text and groupId are required' });
     }
-    sendProviderReply(reply, provider.audit(body as unknown as AuditRequest));
+    sendProviderReply(reply, await provider.audit(body as unknown as AuditRequest));
   });
 
   registerTestEndpoints(app, state, mode);

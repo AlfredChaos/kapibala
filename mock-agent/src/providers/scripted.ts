@@ -1,9 +1,10 @@
 // scripted provider（DES/12 §3）：确定性剧本引擎 + 默认剧本。
 // - 剧本步按 (runId, 调用序号) 推进；播完回落默认剧本「get_recent_messages → send_message → finish」。
-// - ag-1..7 协议故障开关（switches/protocol.ts）：命中即直接回故障响应，优先于剧本与默认路径。
+// - ag-1..7 协议故障（protocol.ts）+ ag-8..16/18 行为故障（behavior.ts）：hang > slow > 协议 fault
+//   > 行为生成 > 剧本 > 默认路径；慢速只延迟内容不变；audit 侧走 auditDelayMs/applyAuditFault。
 // - 无状态全量历史规约（DES/12 §2.1）：默认剧本的下一步只由请求 messages 推出——
 //   看最后一个已执行的 tool_use 决定剧本位置；同 runId 相同 messages 的重发返回新响应（新 tool_use.id）。
-// - /agent/audit 确定性 pass（故障形态 ag-14/15/16 归 T-P4-03）。
+// - /agent/audit 确定性 pass（故障形态 ag-14/15/16 由本模块的 auditDelayMs/applyAuditFault 注入）。
 import type {
   AgentMessage,
   AgentTriggerContext,
@@ -14,15 +15,24 @@ import type {
   TurnResponse,
 } from '@kapibala/contract';
 import type { AgentState, PlaybookStep } from '../scenario.js';
+import {
+  applyAuditFault,
+  applyBehaviorTurn,
+  auditDelayMs,
+  behaviorDelayMs,
+  HANG,
+  sleepUnref,
+} from '../switches/behavior.js';
 import { applyProtocolFault } from '../switches/protocol.js';
 
 /** provider 给 HTTP 层的应答：json = 契约形状（序列化）；raw = 原样字节（故障注入通道） */
 export type ProviderReply = { kind: 'json'; value: unknown } | { kind: 'raw'; body: string; statusCode?: number };
 
 export interface AgentProvider {
-  turn(request: TurnRequest): ProviderReply;
-  audit(request: AuditRequest): ProviderReply;
+  turn(request: TurnRequest): Promise<ProviderReply>;
+  audit(request: AuditRequest): Promise<ProviderReply>;
 }
+
 
 function nextToolUseId(state: AgentState): string {
   state.tuSeq += 1;
@@ -122,11 +132,23 @@ function defaultTurn(state: AgentState, request: TurnRequest): ProviderReply {
 
 export function createScriptedProvider(state: AgentState): AgentProvider {
   return {
-    turn(request) {
+    async turn(request) {
+      // ag-13 hang_turn / ag-12 slow_turn：延迟先决于内容（hang = 永不 resolve；unref 定时器不拖进程）
+      const delayMs = behaviorDelayMs(state, request.runId);
+      if (delayMs === Number.POSITIVE_INFINITY) {
+        await HANG;
+      } else if (delayMs > 0) {
+        await sleepUnref(delayMs);
+      }
       // 协议故障开关优先于剧本：持续型注入 = 命中开关的每次 turn 都炸（DES/12 §7 行 1–7）
       const fault = applyProtocolFault(state, request.runId);
       if (fault !== undefined) {
         return fault;
+      }
+      // 行为生成（ag-8..11）：命中才拦路；ag-8 只在历史里有已完成 send_message 时注入同 key 重发
+      const behavior = applyBehaviorTurn(state, request);
+      if (behavior !== undefined) {
+        return behavior;
       }
       const steps = state.playbooks.get(request.runId) ?? state.playbooks.get('*');
       if (steps !== undefined) {
@@ -141,8 +163,18 @@ export function createScriptedProvider(state: AgentState): AgentProvider {
       return defaultTurn(state, request);
     },
     // audit 契约 {verdict:'pass'|'fail', reason}（REQ §2.2）：scripted 默认确定性 pass；
-    // 500 / 坏 body / 慢 / 挂是 ag-14..16 的注入面，T-P4-03 接线前先登记于 state.switches。
-    audit(request: AuditRequest) {
+    // ag-14/15/16（500 / 坏 body / 慢 / 挂）走 auditDelayMs + applyAuditFault。
+    async audit(request: AuditRequest) {
+      const delayMs = auditDelayMs(state);
+      if (delayMs === Number.POSITIVE_INFINITY) {
+        await HANG;
+      } else if (delayMs > 0) {
+        await sleepUnref(delayMs);
+      }
+      const fault = applyAuditFault(state);
+      if (fault !== undefined) {
+        return fault;
+      }
       const value: AuditResponse = {
         verdict: 'pass',
         reason: `scripted audit ok for group ${request.groupId} (${request.text.length} chars)`,
