@@ -6,3 +6,6 @@ media/
 *.tsbuildinfo
 *.log
 .DS_Store
+test-results/
+web/tests/e2e/.e2e-state.json
+web/tests/e2e/.e2e-backend.log

@@ -961,7 +961,7 @@
   d) key 只进本地 `.env` 绝不提交；无 any
   e) 矩阵 C2、A-21（AGENT_URL 切换）登记应勾；C2 切换说明进 README（T-P8-04）
 
-### T-P8-03 C3：Playwright 冒烟（单条，已授权）            [status: TODO]
+### T-P8-03 C3：Playwright 冒烟（单条，已授权）            [status: DONE]
 - goal: 一条 Playwright 测试：登录 → 打开群 → 看到 agent run 的步骤；可重复运行。
 - refs: REQ C3；DRIVER-PROMPT 授权声明 2；DES/15-web-console.md §6（「不写 Playwright（除非 C3 获准）」的获准例外）；DES/12 §9
 - owned: web/playwright.config.ts、web/tests/e2e/smoke.spec.ts

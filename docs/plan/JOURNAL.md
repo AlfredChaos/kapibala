@@ -273,6 +273,15 @@
 - 踩坑：① **it 默认 testTimeout=5s vs 场景环境启动 ~5s+**——三用例均报「Test timed out in 5000ms」挂在 startScenarioEnv（此前一次跑过纯属余量够），按 s6 逐字惯例补 `}, 60000)`；② 并行/重负载下 waitFor 放宽只对「等事件落库/实时帧」这类外部时延，≤3s 补发计时断言不放宽（契约本身）；③ **兄弟 T-P7-02 把 `first_attempt_at IS NULL` 守卫误加到 markUnknown/429 复位**（claimAttempt 先落 first_attempt_at，post-claim 永不命中 → 全错误路径楔住）→ 已改 `IS NOT NULL`（行被本尝试 claim 且仍 queued 才可写回），outbound-dispatcher/unknown-adjudicator/s4 恢复绿且 crash 测试不受影响（已与本主确认）。
 - VITEST 登记：S-07/S-08/B4-1（端到端）应勾；P6 阶段门演示记录 = 本条 + demo PASS 输出。
 
+
+## 2026-09-28 T-P8-03 C3：Playwright 冒烟（单条，已授权）
+- 做了什么：`web/playwright.config.ts`（webServer 数组拉起全栈：① `server/tests/e2e/backend.ts`（tsx 直跑：真 PG 模板库+mock-gateway+mock-agent+boot() 固定 :3000——vite.config.ts 代理逐字目标；EADDRINUSE 重试 12 次吸收 teardown 滞后；数据装配：setupGroup active + agentEnabled + playbook 剧本（send_message→finish）+ emit 触发 + 等首行 step 落库 → 写 .e2e-state.json stage=ready）；② vite dev :5173 --host 127.0.0.1）+ `tests/e2e/global-setup.ts`（删上轮 state）+ `tests/e2e/smoke.spec.ts`（唯一用例：登录 → goto /groups/:id → 点 run 链接 → /agent-runs/:id 页面 step-list 含 send_message/final）。
+- 验证命令与输出摘录：`pnpm e2e` → `1 passed (5.7s)`；连跑 4 次全绿（5.1s/4.7s/7.5s/7.2s），零孤儿进程残留；tsc/eslint 全绿。
+- 先红后绿：首跑红因 env 装配竞态（health 就绪早于数据装配完 → 旧 state 文件 groupId 指向已删库 → GROUP_NOT_FOUND）；修复为「装配完成写 stage=ready + 测试端循环等文件」形态。随后两轮连挂的根因排查见踩坑。
+- 偏差与【解读】：① 「打开群」落地为 goto /groups/:id（无 /groups 列表路由——既有路由表逐字）+ 点击 run 链接进详情页；② 等首行 step 而非 run 终态（页面只验证「steps 可见」——并行负载下终态可能拖到分钟级，首行在首轮响应写回即存在）；③ 后台进程走「tsx 直调 + vite bin」——pnpm exec 的孙进程会成孤儿；④ C3 场景前后端授权声明 exempt DES/15 §6 禁令，仅此一条 E2E 不扩面。
+- 踩坑（两连挂真凶）：**playwright.config.ts 顶层代码在每个 worker 进程里会再求值一次**——把「删上轮 state 文件」放顶层，worker 启动时（晚于 backend ready 写盘）把本轮 state 删掉 → 测试侧 readState 等不到文件、耗尽 240s。修：删文件挪 globalSetup（主进程一次、恰在 webServer 拉起后）。次级坑：① pnpm exec webServer command 的孙进程（tsx）teardown 杀不到 → :3000 残留端口冲突 → 改直调 node_modules/.bin；② vite dev 默认绑 localhost（可能解析 ::1）而 Playwright 探 127.0.0.1 → --host 127.0.0.1 钉死；③ 全栈装配上 90s testTimeout 在兄弟并行测试负载下不够 → 240s（契约只要求可重复，不计时）。
+- VITEST 登记：C3 ❌→✅ 应勾（00-SPEC.md 矩阵行已登记 C3=T-P8-03）；DES/11 统计：E2E 层从 0 → 1 条（Playwright smoke）。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
