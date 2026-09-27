@@ -34,6 +34,7 @@ import { registerJoinTimeoutScan } from './scheduler/join-timeout-scan.js';
 import { registerDispatchWakeupScan } from './scheduler/dispatch-wakeup.js';
 import { startOutboundDispatcher, type OutboundDispatcher } from './modules/messages/dispatcher.js';
 import { registerUnknownSettleScan } from './scheduler/unknown-scan.js';
+import { registerTriggerSweepScan } from './scheduler/trigger-sweep.js';
 import { attachWsHub, type WsHub } from './ws/hub.js';
 import { createWsEventRetentionScan, WS_EVENT_RETENTION_SCAN_NAME } from './ws/retention.js';
 
@@ -174,6 +175,7 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   registerDispatchWakeupScan({ pool, registry, logger, wake: outboundDispatcher.wake }); // T-P3-02：queued 漏唤醒兜底（1s 节拍）
   registerJoinTimeoutScan({ pool, registry }); // T-P3-06：waiting_joins 的 join_deadline 超时收口
   registerUnknownSettleScan({ pool, registry, logger, gateway, wakeDispatcher: outboundDispatcher.wake }); // T-P3-03：unknown 判定器 1s 兜底节拍
+  registerTriggerSweepScan({ pool, registry, logger }); // T-P4-04：agent_trigger_queue 兜底（5s，R-B 守卫同判）
   registry.register(WS_EVENT_RETENTION_SCAN_NAME, createWsEventRetentionScan({ pool }));
   // WS hub（T-P2-10）：挂在共享 app.server 的 /ws 升级路径（DES/01 同端口）；
   // 监听前先 attach——upgrade 监听随 listen 生效，boot 测试断言 attach 顺序无要求。

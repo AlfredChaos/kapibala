@@ -7,6 +7,7 @@
 // 按 sentAt 升序, policy:{autoKickEnabled}, ownPlatformUserIds:[全部服务账号 puid] }。
 // 本文件只覆盖「入口触发」；run 结束事务的积压补建 / 调度器 SWEEP / executor 编排归 T-P4-04 接管。
 import type { PoolClient } from 'pg';
+import { startAgentRun } from './trigger.js';
 
 export interface TriggerMessageInput {
   /** message.id（agent_trigger_queue 的外键） */
@@ -78,5 +79,6 @@ export async function tryTriggerAgentRun(
     "INSERT INTO ws_event (type, payload) VALUES ('agent_run', $1::jsonb)",
     [JSON.stringify({ runId, groupId: group.id, status: 'running', endReason: null })],
   );
+  startAgentRun(runId); // executor 拾取占位缝（T-P4-05 接管 §2.1）
   return 'run_created';
 }
