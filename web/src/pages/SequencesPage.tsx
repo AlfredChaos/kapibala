@@ -1,32 +1,23 @@
 // /sequences 页面（T-P6-07；DES/15 §2 页面 5、DES/07 §1/§2/§6、REQ §4 页面 5）。
-// 三块：① 序列定义表单（steps 编辑+校验 → POST /api/sequences，本地列表登记）；
+// 三块：① 序列定义表单（steps 编辑+校验 → POST /api/sequences，成功后重拉定义列表）；
 // ② 启动表单（选群 + vars/stepVars JSON 编辑器 → POST /api/groups/:id/sequence-runs；
 //   422 UNRESOLVED_PLACEHOLDER → stepIndex/key 定位并高亮序列定义里出错的步骤行；
 //   201 → GET run → PreflightModal 逐步渲染 resolvedVars/varSources）；
 // ③ 运行视图（status/currentStepIndex + 每步 status/scheduledAt/sentAt；
 //   WS sequence_run 帧推进 currentStepIndex/status 并同步重拉详情拿步级 sentAt）。
-// 注意：后端无 GET /api/sequences 定义列表路由（QR §1 逐字）——本地登记本会话内创建的序列。
+// 定义列表数据源：GET /api/sequences（DES/15 §2 页面 5 数据源行「GET（定义列表）」——后端端点见
+// design/README 解释声明 #27）。列表内容由服务端裁决，刷新页面不再丢定义。
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { isApiError, useAuth } from '../auth/AuthProvider.js';
 import { PreflightModal } from '../components/PreflightModal.js';
 import { SequenceForm, type SequenceDraft } from '../components/SequenceForm.js';
-import type {
-  GroupView,
-  SequenceRunView,
-  SequenceStepDef,
-} from '../lib/api-types.js';
+import type { GroupView, SequenceListItem, SequenceRunView } from '../lib/api-types.js';
 import { useWsEvent } from '../ws/useWsEvent.js';
-
-interface LocalSequence {
-  readonly id: string;
-  readonly name: string;
-  readonly steps: SequenceStepDef[];
-}
 
 export function SequencesPage(): JSX.Element {
   const { client } = useAuth();
-  const [sequences, setSequences] = useState<LocalSequence[]>([]);
+  const [sequences, setSequences] = useState<SequenceListItem[]>([]);
   const [groups, setGroups] = useState<GroupView[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,29 +43,42 @@ export function SequencesPage(): JSX.Element {
       .catch(() => setGroups([]));
   }, [client]);
 
+  // 定义列表 = 服务端唯一数据源；读失败按空列表渲染（与 /api/groups 同一处理，
+  // 定义/启动的失败另有页面错误区承载）
+  const loadSequences = useCallback(async (): Promise<void> => {
+    try {
+      setSequences(await client.request<SequenceListItem[]>('/api/sequences'));
+    } catch {
+      setSequences([]);
+    }
+  }, [client]);
+
+  useEffect(() => {
+    void loadSequences();
+  }, [loadSequences]);
+
   const loadRun = useCallback(
     async (runId: string): Promise<void> => {
       try {
         setRunView(await client.request<SequenceRunView>(`/api/sequence-runs/${runId}`));
-      } catch {
-        /* 详情拉取失败不挡主流程 */
+        setError(null);
+      } catch (err) {
+        // 静默 catch → 上页级错误区（WS 触发的重拉失败也应可见）
+        setError(isApiError(err) ? `${err.code}：${err.message}` : '请求失败（网络错误）');
       }
     },
     [client],
   );
 
-  // 定义提交
+  // 定义提交：POST 成功后重拉列表（不再本地登记——steps 快照/createdAt 一律以 GET 返回为准）
   async function define(draft: SequenceDraft): Promise<void> {
     setError(null);
     try {
-      const res = await client.request<{ id: string }>('/api/sequences', {
+      await client.request<{ id: string }>('/api/sequences', {
         method: 'POST',
         body: JSON.stringify({ name: draft.name, steps: draft.steps }),
       });
-      setSequences((prev) => [
-        ...prev,
-        { id: res.id, name: draft.name, steps: draft.steps },
-      ]);
+      await loadSequences();
     } catch (err) {
       setError(isApiError(err) ? `${err.code}：${err.message}` : '创建失败');
     }
@@ -161,11 +165,11 @@ export function SequencesPage(): JSX.Element {
         onDefine={define}
       />
 
-      {/* 序列列表（本地登记，后端无 GET /api/sequences 路由） */}
+      {/* 已定义序列（GET /api/sequences 的服务端列表） */}
       <section>
         <h3>已定义序列</h3>
         {sequences.length === 0 ? (
-          <p data-testid="seq-empty">（本会话暂无定义）</p>
+          <p data-testid="seq-empty">（暂无定义）</p>
         ) : (
           <ul>
             {sequences.map((s) => (

@@ -3,6 +3,7 @@
 // 断言逐字：
 //   定义表单校验与后端一致（index 正整数唯一 / accountRole∈{admin,member} /
 //     text 1..TEXT_MAX_LENGTH / delaySeconds 非负整数）；
+//   已定义序列列表来自 GET /api/sequences（mount 拉取 + 定义成功后重拉；解释声明 #27 端点）；
 //   启动 422 UNRESOLVED_PLACEHOLDER → stepIndex/key 定位并高亮对应步骤行；
 //   预检成功（201+拉详情）→ PreflightModal 逐步渲染 resolvedVars/varSources（default/step:<i>）；
 //   运行视图 status/currentStepIndex/scheduledAt/sentAt；WS sequence_run → currentStepIndex
@@ -15,7 +16,11 @@ import { AuthProvider, useAuth, type AuthState } from '../src/auth/AuthProvider.
 import { SequencesPage } from '../src/pages/SequencesPage.js';
 import { getWsClient, initWsClient, resetWsClient } from '../src/ws/useWsEvent.js';
 import type { WebSocketLike } from '../src/ws/WsClient.js';
-import type { SequenceRunView } from '../src/lib/api-types.js';
+import type {
+  SequenceListItem,
+  SequenceRunView,
+  SequenceStepDef,
+} from '../src/lib/api-types.js';
 
 declare const globalThis: { IS_REACT_ACT_ENVIRONMENT?: boolean };
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -36,6 +41,27 @@ const GROUPS = [
     members: [],
     activeSequenceRunId: null,
     activeAgentRunId: null,
+  },
+];
+
+/** 「库」内的定义行：POST 落库、GET 读出——页面只能靠 GET 拿到列表 */
+let serverSequences: SequenceListItem[] = [];
+
+const SEQ_SERVER: SequenceListItem[] = [
+  {
+    id: 'seq-s1',
+    name: '服务端序列',
+    steps: [{ index: 1, accountRole: 'admin', text: 'a', delaySeconds: 0 }],
+    createdAt: '2026-09-28T00:00:00Z',
+  },
+  {
+    id: 'seq-s2',
+    name: '服务端序列二',
+    steps: [
+      { index: 1, accountRole: 'admin', text: 'a', delaySeconds: 0 },
+      { index: 2, accountRole: 'member', text: 'b', delaySeconds: 5 },
+    ],
+    createdAt: '2026-09-28T00:00:01Z',
   },
 ];
 
@@ -86,11 +112,13 @@ function jsonResponse(status: number, body: unknown): Response {
 
 type Route = (path: string, init: RequestInit) => Response | null;
 
-function installFetch(routes: Route[]): { calls: Array<{ path: string; body?: string }> } {
-  const calls: Array<{ path: string; body?: string }> = [];
+function installFetch(routes: Route[]): {
+  calls: Array<{ path: string; method: string; body?: string }>;
+} {
+  const calls: Array<{ path: string; method: string; body?: string }> = [];
   const fn = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
-    calls.push({ path, body: typeof init?.body === 'string' ? init.body : undefined });
+    calls.push({ path, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : undefined });
     for (const r of routes) {
       const res = r(path, init ?? {});
       if (res !== null) return res;
@@ -133,6 +161,7 @@ function lastSocket(): FakeSocket {
 
 beforeEach(() => {
   FakeSocket.instances = [];
+  serverSequences = [];
   resetWsClient();
   initWsClient({
     tokens: { getAccessToken: () => 't', refreshToken: () => Promise.resolve('t') },
@@ -177,7 +206,7 @@ describe('序列页', () => {
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  async function mount(routes: Route[]): Promise<{ calls: { path: string; body?: string }[] }> {
+  async function mount(routes: Route[]): Promise<{ calls: Array<{ path: string; method: string; body?: string }> }> {
     const { calls } = installFetch(routes);
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -203,6 +232,30 @@ describe('序列页', () => {
     return { calls };
   }
 
+  /** 定义域桩：GET = 读库内行；POST = 落库并返回 {id}（落库后 GET 才看得见 → 页面必须重拉） */
+  const sequenceRoutes: Route[] = [
+    (p, init) =>
+      p === '/api/sequences' && init.method !== 'POST' ? jsonResponse(200, serverSequences) : null,
+    (p, init) => {
+      if (p !== '/api/sequences' || init.method !== 'POST') return null;
+      const body = JSON.parse(String(init.body ?? '{}')) as {
+        name?: string;
+        steps?: SequenceStepDef[];
+      };
+      serverSequences = [
+        ...serverSequences,
+        {
+          id: 'seq-1',
+          // srv- 前缀 = 只有重拉服务端才拿得到的标记：本地登记残留会在这里露馅
+          name: `srv-${body.name ?? ''}`,
+          steps: body.steps ?? [],
+          createdAt: '2026-09-28T00:00:00Z',
+        },
+      ];
+      return jsonResponse(201, { id: 'seq-1' });
+    },
+  ];
+
   const baseRoutes: Route[] = [
     (p, _init) =>
       p === '/api/auth/login'
@@ -213,8 +266,7 @@ describe('序列页', () => {
           })
         : null,
     (p) => (p === '/api/groups' ? jsonResponse(200, GROUPS) : null),
-    (p, init) =>
-      p === '/api/sequences' && init.method === 'POST' ? jsonResponse(201, { id: 'seq-1' }) : null,
+    ...sequenceRoutes,
   ];
 
   afterEach(async () => {
@@ -231,18 +283,42 @@ describe('序列页', () => {
     await act(async () => submit.click());
     // 空 text → 本地错误，无 POST
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('text');
-    expect(calls.filter((c) => c.path === '/api/sequences')).toHaveLength(0);
+    expect(calls.filter((c) => c.path === '/api/sequences' && c.method === 'POST')).toHaveLength(0);
   });
 
-  it('合法定义 → POST /api/sequences + 本地列表登记', async () => {
+  it('已定义序列列表来自服务端（mount GET /api/sequences，非本地登记）', async () => {
+    serverSequences = SEQ_SERVER;
     const { calls } = await mount(baseRoutes);
+    expect(
+      calls.filter((c) => c.path === '/api/sequences' && c.method === 'GET').length,
+    ).toBeGreaterThan(0);
+    expect(container.querySelector('[data-testid="seq-item-seq-s1"]')?.textContent).toContain(
+      '服务端序列',
+    );
+    expect(container.querySelector('[data-testid="seq-item-seq-s2"]')?.textContent).toContain('2 步');
+    expect(container.querySelector('[data-testid="seq-empty"]')).toBeNull();
+    // 启动表单的序列下拉同源：服务端列表即页面唯一序列来源
+    expect(el('[data-testid="launch-seq"]').textContent).toContain('服务端序列');
+  });
+
+  it('合法定义 → POST /api/sequences 后重拉 GET（渲染服务端行）', async () => {
+    const { calls } = await mount(baseRoutes);
+    const getsBefore = calls.filter(
+      (c) => c.path === '/api/sequences' && c.method === 'GET',
+    ).length;
     setInput(el('[data-testid="seq-name"]'), 's1');
     setInput(el('[data-testid="step-text-0"]'), 'hello {nick}');
     await act(async () => {
       must(container.querySelector<HTMLButtonElement>('[data-testid="seq-submit"]')).click();
     });
-    expect(calls.some((c) => c.path === '/api/sequences')).toBe(true);
-    expect(container.querySelector('[data-testid="seq-item-seq-1"]')?.textContent).toContain('s1');
+    expect(calls.some((c) => c.path === '/api/sequences' && c.method === 'POST')).toBe(true);
+    // 第二次 GET：定义成功后列表回到服务端数据源
+    expect(
+      calls.filter((c) => c.path === '/api/sequences' && c.method === 'GET').length,
+    ).toBeGreaterThan(getsBefore);
+    expect(container.querySelector('[data-testid="seq-item-seq-1"]')?.textContent).toContain(
+      'srv-s1',
+    );
   });
 
   it('预检 422 → stepIndex/key 定位并在定义步骤行高亮', async () => {
@@ -259,7 +335,7 @@ describe('序列页', () => {
       }) : null),
     ];
     await mount(routes);
-    // 先定义一个 2 步序列（本地登记，编辑器行存在于页面里）
+    // 先定义一个 2 步序列（POST 落库 → 页面重拉 GET：列表与编辑器行都来自服务端）
     setInput(el('[data-testid="seq-name"]'), 'seq422');
     // 加一步
     await act(async () => {
@@ -267,7 +343,7 @@ describe('序列页', () => {
     });
     setInput(el('[data-testid="step-text-0"]'), 'hi {nick}');
     setInput(el('[data-testid="step-text-1"]'), 'use {code} now');
-    // 提交定义 → 本地列表 + launch-seq 下拉出现
+    // 提交定义 → 重拉的服务端列表 + launch-seq 下拉出现
     await act(async () => {
       must(container.querySelector<HTMLButtonElement>('[data-testid="seq-submit"]')).click();
     });

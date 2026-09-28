@@ -1,5 +1,6 @@
 // API DTO 镜像（T-P5-04；字段名与 server 模块输出逐字一致——只读视图，不做运行时校验）。
-// 出处：server/src/modules/groups/query.ts GroupView、server/src/modules/agent/query.ts AgentRunView。
+// 出处：server/src/modules/groups/query.ts GroupView、server/src/modules/agent/query.ts AgentRunView、
+// server/src/modules/sequences/query.ts SequenceListItem。
 import type { AgentRunStatus, AgentRunEndReason } from '@kapibala/contract';
 
 export interface GroupMemberView {
@@ -71,6 +72,15 @@ export interface SequenceStepDef {
   readonly accountRole: 'admin' | 'member';
   readonly text: string;
   readonly delaySeconds: number;
+}
+
+/** GET /api/sequences 定义列表项（server modules/sequences/query.ts SequenceListItem 逐字：
+ *  steps = 定义时原样入库的快照；createdAt ISO 8601 UTC） */
+export interface SequenceListItem {
+  readonly id: string;
+  readonly name: string;
+  readonly steps: SequenceStepDef[];
+  readonly createdAt: string;
 }
 
 /** GET /api/sequence-runs/:id 步视图（server query.ts SequenceStepView 逐字） */
