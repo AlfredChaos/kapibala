@@ -7,7 +7,7 @@
 //   WS sequence_run 帧推进 currentStepIndex/status 并同步重拉详情拿步级 sentAt）。
 // 定义列表数据源：GET /api/sequences（DES/15 §2 页面 5 数据源行「GET（定义列表）」——后端端点见
 // design/README 解释声明 #27）。列表内容由服务端裁决，刷新页面不再丢定义。
-import { ArrowLeft, ListOrdered, Play, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, ChevronRight, ListOrdered, Play, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { isApiError, useAuth } from '../auth/AuthProvider.js';
@@ -22,6 +22,8 @@ export function SequencesPage(): JSX.Element {
   const { client } = useAuth();
   const [sequences, setSequences] = useState<SequenceListItem[]>([]);
   const [groups, setGroups] = useState<GroupView[]>([]);
+  // 「已定义序列」行级展开态——点行头看 steps 详情（需求外 UX 补齐，2026-09-28）
+  const [expandedSeqId, setExpandedSeqId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // 启动表单
@@ -191,19 +193,50 @@ export function SequencesPage(): JSX.Element {
             </EmptyState>
           ) : (
             <ul className="divide-y divide-hairline/60">
-              {sequences.map((s) => (
-                <li
-                  key={s.id}
-                  data-testid={`seq-item-${s.id}`}
-                  className="flex items-center gap-2 py-2 text-sm"
-                >
-                  <code className="font-mono text-xs text-info">{s.id}</code>
-                  <span className="min-w-0 flex-1 truncate text-ink-muted">{s.name}</span>
-                  <span className="shrink-0 text-xs text-ink-tertiary">
-                    （{s.steps.length} 步）
-                  </span>
-                </li>
-              ))}
+              {sequences.map((s) => {
+                const open = expandedSeqId === s.id;
+                return (
+                  <li key={s.id} data-testid={`seq-item-${s.id}`} className="py-2 text-sm">
+                    {/* 行头：点击展开/收起 steps 详情（原生 button 语义，键盘可达） */}
+                    <button
+                      type="button"
+                      data-testid={`seq-expand-${s.id}`}
+                      aria-expanded={open}
+                      onClick={() => setExpandedSeqId(open ? null : s.id)}
+                      className="flex w-full cursor-pointer items-center gap-2 text-left"
+                    >
+                      <ChevronRight
+                        size={13}
+                        aria-hidden
+                        className={cx(
+                          'shrink-0 text-ink-tertiary transition-transform duration-150',
+                          open && 'rotate-90',
+                        )}
+                      />
+                      <code className="font-mono text-xs text-info">{s.id.slice(0, 8)}…</code>
+                      <span className="min-w-0 flex-1 truncate text-ink-muted">{s.name}</span>
+                      <span className="shrink-0 text-xs text-ink-tertiary">
+                        （{s.steps.length} 步）
+                      </span>
+                    </button>
+                    {open && (
+                      <ol
+                        data-testid={`seq-steps-${s.id}`}
+                        className="ml-6 mt-1.5 flex flex-col gap-1"
+                      >
+                        {s.steps.map((st) => (
+                          <li
+                            key={st.index}
+                            className="rounded-md border border-hairline bg-surface-2/40 px-3 py-1.5 font-mono text-xs text-ink-muted"
+                          >
+                            #{st.index} {st.accountRole} delay={st.delaySeconds}s — {st.text}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>
