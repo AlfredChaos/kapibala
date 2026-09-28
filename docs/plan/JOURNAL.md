@@ -377,3 +377,20 @@
 - 偏差与【解读】：…
 - 踩坑：…
 -->
+
+## 2026-09-28 UX 审计缺陷修复（audit-2026-09-28 复审闭环）
+- 做了什么：按 `docs/review/ux-audit-2026-09-28/REPORT.md` 的缺陷清单批量修复（73/73 卡 DONE 之后的审计闭环；**整批未提交**，commit/push 留给用户）：
+  - ① 后端补 `GET /api/sequences` 定义列表——`server/src/modules/sequences/query.ts` 加 `listSequences`（列名按 008-sequence.sql 的 `sequence(id,name,steps jsonb,created_at)`；`ORDER BY created_at ASC, id ASC`；`createdAt` ISO 8601 UTC）+ `routes/sequences.ts` 加 GET（`auth:'required'` 读路径 viewer 可读，包络逐字沿用 `GET /api/groups` 裸数组）；空隙登记为 `docs/design/README.md` 解释声明 **#27**；新测试 `server/tests/sequences/list-query.test.ts`（4 例：空表 / N 条逐字段 / viewer 200+匿名 401 / 稳定排序——直插固定 uuid 制造同刻并列）。闭 REPORT 条目 21 与 T-P6-07 偏差②（F5 刷新丢定义）。
+  - ② WS 订阅竞态根修：`web/src/ws/useWsEvent.ts` 的订阅改经 `useSyncExternalStore` 盯单例就绪（模块级就绪监听集 + `subscribeReady`/`getWsClient` 稳定引用，`resetWsClient` 通知退订）——根因是页面 effect 早于 AuthProvider 装配 effect 时 `getWsClient()` 仍为 null，订阅永久哑火（整页静默丢实时）。`AppShell` 的 `RealtimeBanner` 接 `useWsBacklogExpired` 收口（DES/15 §3 末条：`WsClient.onBacklogExpired` 的 React 侧接线，`ws_backlog_expired` → 常驻红条 + 整页重载；其余 kind 走可关琥珀条并在 inconsistency 订阅里跳过同 kind 免双条）。
+  - ③ `AppShell` 导航壳（登录名/角色/登出 + 三页导航，router authed 区统一包裹）+ 新页 `/groups`（`GET /api/groups` 列表 + 建群 `POST` 202 → `GET /api/jobs/:jobId` 轮询；`finished` 用提交前后列表差集定位新群，`failed` 逐字展示 `errors[{step,code}]`）+ `NotFoundPage`（`*` 兜底改显式 404 页，仍在守卫内）。
+  - ④ `AgentRunPage`：非终态 3s 轻量轮询（`live` 布尔作 dep，终态/卸载即清定时器）补「帧丢/补发窗口/订阅期」盲区 + 返回链接容错（`groupId` 未知退回 `/groups`，不再产出 `/groups/` 空尾链接）+ 有错误时不叠「加载中…」假象。
+  - ⑤ `GroupDetailPage`：`GROUP_NOT_FOUND`/404 → `notFound` 终态（「群不存在」区块，不再挂通用 alert 与加载假象）+ 同页 A→B 换 id 时先复位读态（否则 in-flight 期间挂着 A 的 404/旧详情渲染 B——review 实锤）。
+  - ⑥ `AccountsPage`：`→suspended` 终态转移先 `window.confirm` 再 POST（REQ §4 页面 2「不可恢复」门槛）。
+  - ⑦ `SequencesPage`：定义列表数据源换成服务端（mount + 定义成功后重拉），删除本会话本地登记；`web/src/lib/api-types.ts` 加 `SequenceListItem` 镜像；`loadRun` 的静默 catch 改为进页面错误区。
+- 验证命令与输出摘录：
+  - 先红（各自因正确的原因失败）：server `list-query.test.ts` 4 例 `AssertionError: expected 404 to be 200`（路由不存在）；web `sequences-page.test.tsx` 2 例 `AssertionError: expected 0 to be greater than 0`（页面未发 GET /api/sequences）。
+  - 复审：独立 reviewer 会话 `review-fixes` 对全量 ws/router diff → **APPROVE**（其 2 条 RISK 已在收口时消解：`useWsBacklogExpired` 已接线 AppShell 横幅、跨 id 复位已进 GroupDetailPage）。
+  - 本批次五门（按序实跑，全绿）：`pnpm lint` → `eslint .` 0 错（exit 0）· `pnpm -F server typecheck` → `tsc --noEmit -p tsconfig.test.json` Done · `pnpm -F web typecheck` → `tsc --noEmit` Done · `pnpm -F web test` → `Test Files 9 passed (9) / Tests 69 passed (69)` · `pnpm build` → contract/mock-gateway/mock-agent/server `tsc` Done + web `vite build` ✓ `dist/assets/index-Dz740co6.js 279.86 kB │ gzip: 88.85 kB`。
+  - server 全量套件：后端面落地时已实跑 `Test Files 58 passed (58) / Tests 438 passed (438)`（80.14s；簿记门按指示未重跑，DB-bound）。
+- 偏差与【解读】：① `GET /api/sequences` 属**契约空隙补全**——design/15 §2 页面 5 数据源行要求「GET（定义列表）」而 QR §1 端点表只列 POST；响应形状不发明 `{ items }` 包装，逐字对齐 `GET /api/groups`/`GET /api/accounts` 裸数组；`docs/analysis/10-quick-reference.md` 的端点汇总视图不改（该文档自声明「非规范源」），依据落在解释声明 #27。② 本仓 auth 词表只有 `public|required|write`（`plugins/auth-guard.ts`），「viewer 可读」落 `auth:'required'`，非新造 `'read'`。③ 序列页空态文案「（本会话暂无定义）」→「（暂无定义）」：列表已是服务端范围，会话措辞失真；定义列表 GET 失败按空列表渲染，沿用同页 `GET /api/groups` 既有处理，不新增错误面。④ 测试新文件命名 `list-query.test.ts`（`tests/sequences/` 目录已限定域，与 `run-query.test.ts` 同构）。⑤ 群列表时间戳列：`GET /api/groups` 的 GroupView 无 `createdAt` → 列保留、缺值渲染「—」，后端补字段即自动生效（不伪造字段）。⑥ JOURNAL/HANDOFF 追加按 02-TASKS.md 规则 1（F2 簿记豁免 / SP-6）属编排者簿记，本次由 worker 依编排者指令代笔。
+- 踩坑：① **「后端缺端点」被前端内存列表掩盖**是本轮最贵的坑——UI 看着对、刷新即穿帮；补数据源前先确认缺口在契约面而非展示面。② 竞态修复的正解是**就绪门控**（`useSyncExternalStore` 盯单例），不是「延迟/重试订阅」：快照函数与 subscribe 引用必须模块级稳定，否则 `useSyncExternalStore` 每渲染失效重订。③ web 测试桩同路径 GET+POST 双语义后，旧断言「`/api/sequences` 调用数 = 0」不再等价「没 POST」——`installFetch` 需记 `method`，「0 次 POST」才是原意。④ 让桩把 POST 落库的 name 改写成 `srv-*`，「渲染来自服务端」才成为可区分断言（本地登记残留会露馅）。⑤ 全量并行下的 server flake 依旧（本轮观测：`ws/hub` 背压与 `scenarios/s6` 各挂过一次 20s 超时、孤立跑全绿）——判定流程不变：孤立重跑判性，非新红。
