@@ -5,7 +5,7 @@
 
 ## 1. 状态机（A1 转移表，逐格照抄）
 
-合法转移 15 条；其余（含同态→同态）一律 `ILLEGAL_TRANSITION`。
+合法转移 16 条（REQ A1 网格逐格——含 `disconnected→online`；终态无出边）；其余（含同态→同态）一律 `ILLEGAL_TRANSITION`。
 
 ```mermaid
 stateDiagram-v2
@@ -27,7 +27,7 @@ stateDiagram-v2
     rate_limited --> session_expired : 终态入口B
 
     disconnected --> idle : 手动 transition
-    disconnected --> online : connect 成功
+    disconnected --> online : 手动 transition(纯标记)<br/>或 connect 成功
     disconnected --> suspended : 终态入口A
     disconnected --> session_expired : 终态入口B
 
@@ -63,7 +63,7 @@ WHERE id=$accountId AND status NOT IN ('suspended','session_expired')
 
 ## 2. connect（`POST /api/accounts/:id/connect`）
 
-前置状态集合：`{idle, disconnected}`（§2.3 明文「从 idle / disconnected 变为 online」；`rate_limited` 不在列——它是临时态、物理会话仍在，到期自动回 `online`，操作员此时重连按钮不出现）。【解读】此为对原文的从严解释，实现按此执行。
+前置状态集合：`{idle, disconnected}`（§2.3 明文「从 idle / disconnected 变为 online」；`rate_limited` 不在列——它是临时态、物理会话仍在，到期自动回 `online`，操作员此时重连按钮不出现）。【解读】此为对原文的从严解释，实现按此执行。**注**：connect 前置收窄的是「调网关建会话」的入口；REQ A1 网格的 `disconnected→online` ✔ 仍允许经 transition 纯标记转移（不再视为 connect 专属边——2026-09-28 回拨对齐字面，见 README 解读 #1 修订）。
 
 ```mermaid
 sequenceDiagram

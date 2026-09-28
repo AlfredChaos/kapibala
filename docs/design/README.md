@@ -56,7 +56,7 @@
 
 | # | 分歧点 / 契约空隙 | 本设计的选择 | 出处 |
 |---|---|---|---|
-| 1 | connect 前置状态未穷举 | 从严：仅 `idle/disconnected`（`rate_limited` 到期自动回 online，不提供重连） | [03](03-account-module.md) §2 |
+| 1 | connect 前置状态未穷举 | 从严：仅 `idle/disconnected`（`rate_limited` 到期自动回 online，不提供 connect 重连）；**修订 2026-09-28**：A1 网格 `disconnected→online` 不再视为 connect 专属——transition 可按字面对齐执行该边（纯标记，不触发网关 connect；语义等价 `idle→online`） | [03](03-account-module.md) §1/§2 |
 | 2 | 群 `unreachable` 能否回转 | 不可回转（视为终态）；mock 支持恢复场景时再补边 | [04](04-group-module.md) §1 |
 | 3 | `unreachable`/`left` 群启动序列 | 拒绝：`409 GROUP_UNREACHABLE`（码名自定，契约未定义） | [07](07-sequence-module.md) §2.4 |
 | 4 | leave 失败的 job 错误码名 | `LEAVE_FAILED`（契约未给码名） | [04](04-group-module.md) §3.2 |

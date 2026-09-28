@@ -130,6 +130,20 @@ describe('POST /api/accounts/:id/transition（DES/03 §3 三段式 + disconnect 
     expect(new Date(untilVal instanceof Date ? untilVal.toISOString() : String(untilVal)).toISOString()).toBe(until);
   });
 
+  it('disconnected → online 标记转移 → 200（REQ A1 网格 ✔；纯标记，不调网关 connect）', async () => {
+    await connectAccount('acc-01'); // online（有 platformUserId）
+    const off = await transition('acc-01', { to: 'disconnected', expectedFrom: 'online' });
+    expect(off.statusCode).toBe(200);
+    const res = await transition('acc-01', { to: 'online', expectedFrom: 'disconnected' });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { status: string }).status).toBe('online');
+    expect(await statusOf('acc-01')).toBe('online');
+    // ws_event 有帧（先持久化后推送）
+    const { rows } = await db.pool.query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM ws_event WHERE type='account_status_changed' ORDER BY seq`);
+    const last = rows[rows.length - 1]?.payload;
+    expect(last).toMatchObject({ accountId: 'acc-01', from: 'disconnected', to: 'online' });
+  });
   it('expectedFrom ≠ 当前状态 → 409 CAS_CONFLICT（后写不覆盖先写）', async () => {
     const res = await transition('acc-01', { to: 'disconnected', expectedFrom: 'online' });
     expect(res.statusCode).toBe(409);

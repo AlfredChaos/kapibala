@@ -1,7 +1,8 @@
 // 账号状态机（T-P2-05）：A1 转移表集中定义 + accounts 恢复扫描。
-// 契约出处：REQ A1 转移表逐格（API 表 15 条合法边——扣除 connect 专属 disconnected→online；
-// 表外含同态→同态一律 ILLEGAL_TRANSITION；rateLimitedUntil 刷新不算转移；并发至多一个成功）；
-// DES/03 §1（表、mermaid 逐字）、§5.3 + E10（accounts 恢复扫描两段）；QR §4（错误码）。
+// 契约出处：REQ A1 转移表逐格（API 表 16 条合法边——disconnected→online 也允许，
+// 此前按「connect 专属」收窄已被回拨对齐字面；表外含同态→同态一律 ILLEGAL_TRANSITION；
+// rateLimitedUntil 刷新不算转移；并发至多一个成功）；
+// DES/03 §1、§5.3 + E10（accounts 恢复扫描两段）；QR §4（错误码）。
 // enterTerminal（终态入口 + 六动作副作用）在 terminal.ts（T-P2-06）。
 import type { Pool } from 'pg';
 import type { AccountStatus, AccountTerminalStatus } from '@kapibala/contract';
@@ -24,12 +25,11 @@ export const TERMINAL_STATUSES = ['suspended', 'session_expired'] as const;
 export const CONNECT_FROM = ['idle', 'disconnected'] as const;
 
 /**
- * A1 合法边集合（from→to，15 条 = applyTransition/transition API 的判定表，逐字 DES/03 §1
- * 「合法转移 15 条」+ REQ A1 表格扣除 connect 专属边）。REQ A1 网格 16 ✔ 中，
- * disconnected→online 标的是「connect 成功」（DES/03 §1 mermaid + §2 connect 前置
- * {idle,disconnected}）——操作员 transition 不可标记 online（§3 disconnect 补偿只挂
- * to∈{disconnected,idle}）。connect 自己的 online 转移走 connect.ts 的前置+幂等路径，
- * 不查本表。同态→同态与其余表外组合一律 ILLEGAL_TRANSITION（REQ A1 逐字）。
+ * A1 合法边集合（from→to，16 条 = applyTransition/transition API 的判定表，REQ A1 网格
+ * 逐格对齐——含 disconnected→online；终态两列无出边）。
+ * 说明：transition 是纯标记操作（REQ §2.3「操作员手动标记状态」）——标回 online 不调网关
+ * connect，与 idle→online 行为对称；要建立真实网关会话走 POST /connect（CONNECT_FROM）。
+ * 同态→同态与其余表外组合一律 ILLEGAL_TRANSITION（REQ A1 逐字）。
  */
 export const LEGAL_TRANSITIONS: ReadonlySet<string> = new Set(
   (
@@ -47,6 +47,7 @@ export const LEGAL_TRANSITIONS: ReadonlySet<string> = new Set(
       ['rate_limited', 'suspended'],
       ['rate_limited', 'session_expired'],
       ['disconnected', 'idle'],
+      ['disconnected', 'online'],
       ['disconnected', 'suspended'],
       ['disconnected', 'session_expired'],
     ] as const

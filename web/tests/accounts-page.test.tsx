@@ -226,7 +226,7 @@ describe('转移表同源校验（server LEGAL_TRANSITIONS === web 镜像）', (
     expect(LEGAL_TRANSITIONS_WEB).toEqual(SERVER_LEGAL_TRANSITIONS);
     expect([...CONNECT_FROM_WEB]).toEqual(SERVER_CONNECT_FROM);
     // 抽取非空兜底：服务端文件结构变了会让对照集为空——此时断言自身也该红（防止误绿）
-    expect(SERVER_LEGAL_TRANSITIONS.size).toBe(15);
+    expect(SERVER_LEGAL_TRANSITIONS.size).toBe(16);
   });
 });
 
@@ -242,8 +242,8 @@ describe('legalTargets / canConnect / 倒计时文案', () => {
     // 终态无出边
     expect(legalTargets('suspended')).toEqual([]);
     expect(legalTargets('session_expired')).toEqual([]);
-    // disconnected→online 属 connect 专属，不在操作员目标列（DES/03 §1 注释逐字）
-    expect(legalTargets('disconnected')).not.toContain('online');
+    // disconnected→online 是合法标记边（REQ A1 ✔；真实重连仍走 connect 按钮）
+    expect(legalTargets('disconnected')).toContain('online');
     expect(legalTargets('disconnected')).toContain('idle');
   });
 

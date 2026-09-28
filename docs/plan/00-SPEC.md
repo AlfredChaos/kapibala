@@ -82,7 +82,7 @@ db / gateway / agentclient / config                ← 基础设施
 | `gateway/` | `connect/disconnect/createGroup/invite/join/promote/kick/leave/send/queryByClientId/listMembers/fetchEvents(SSE)/fetchMedia`；超时与类型化错误 `{ status, code, body }` | 01 §4.4/§6.5 |
 | `agentclient/` | `turn(req)/audit(req)`；三段式响应校验（HTTP 状态→JSON 含围栏/夹文→形状） | 01 §6.5、06 §4/§6 |
 | `modules/auth/` | `login/refresh/logout/verifyAccessToken/requireRole`（权限矩阵：viewer 写操作 403） | 09 |
-| `modules/accounts/` | `connectAccount/transitionAccount/listAccounts/enterTerminal/registerRateLimit/resumeExpiredRateLimits`；`transitions.ts` 集中定义 15 条合法边 | 03 |
+| `modules/accounts/` | `connectAccount/transitionAccount/listAccounts/enterTerminal/registerRateLimit/resumeExpiredRateLimits`；`transitions.ts` 集中定义 16 条合法边（REQ 网格逐格） | 03 |
 | `modules/groups/` | `acceptCreateGroup/executeCreateGroupJob/acceptLeaveAll/executeLeaveAllJob/getJob/getGroup/listGroups/patchGroup/applyMemberJoined/applyMemberLeft/markGroupUnreachable` | 04 |
 | `modules/messages/` | `acceptOutbound(operator/agent/sequence 三入口)/runDispatcher/adjudicateUnknown/finalizeSent/applyInboundMessage/listTimeline` | 05 |
 | `modules/agent/` | `maybeTriggerRun/endRunAndChain/sweepTriggerBacklog/claimAndExecuteRun`（executor：turn 循环/协议错误分流/审计/工具/幂等 key/恢复） | 06 |
@@ -254,7 +254,7 @@ db / gateway / agentclient / config                ← 基础设施
 | A0-1 | 迁移可重复/落后拒启 | T-P0-04 | tests/migration.test.ts |
 | A0-2 | 错误响应格式 | T-P0-04 | tests/health.test.ts |
 | A0-3 | viewer 403 | T-P0-07 | tests/auth/session.test.ts |
-| A1-1 | 转移表 15 边 | T-P2-05 | tests/accounts/state-machine.test.ts |
+| A1-1 | 转移表 16 边 | T-P2-05 | tests/accounts/state-machine.test.ts |
 | A1-2 | 终态无出边/幂等 | T-P2-05, T-P2-06 | state-machine / terminal |
 | A1-3 | until 刷新不算转移 | T-P2-07 | tests/accounts/rate-limit.test.ts |
 | A1-4 | CAS 后写不覆盖 | T-P2-05 | tests/accounts/state-machine.test.ts |
