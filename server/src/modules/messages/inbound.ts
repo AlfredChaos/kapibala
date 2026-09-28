@@ -40,6 +40,8 @@ export async function projectInboundMessage(
   client: PoolClient,
   msg: GatewayMessageEvent,
   logger: DispatchLogger,
+  /** 提交后拾取缝（BUGFIX 2026-09-28）：透传 EventDispatchContext.defer，供 agent run 建好后延迟拾取 */
+  defer?: (fn: () => void) => void,
 ): Promise<InboundOutcome> {
   // 1) 群映射：payload.groupId 是网关群 id → 本地 group.gateway_group_id（orphan.ts 已分流
   //    未知群；此处再兜底一次防竞态——映射恰在两步之间被移除）
@@ -122,6 +124,7 @@ export async function projectInboundMessage(
       text: msg.text,
       sentAt: msg.sentAt,
     },
+    defer,
   });
   return 'inserted';
 }

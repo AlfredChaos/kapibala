@@ -97,6 +97,9 @@ export async function handleEventFrame(deps: EventFrameDeps, frame: SseFrame): P
   const payload: unknown = frame.data ?? frame.rawData;
   const event: GatewayEventEnvelope = { eventId, type, payload };
   try {
+    // 提交后副作用队列（BUGFIX 2026-09-28）：handler 经 ctx.defer 登记「事务落库后才发生」的动作
+    //（如拾取新建的 agent run）；必须在 COMMIT 成功后触发，回滚则整体丢弃
+    const deferred: Array<() => void> = [];
     await tx(deps.pool, async (client) => {
       // a) 入站幂等第一道闸（DES/02 §1.3）：at-least-once 重复推送在 PK 冲突处吸收
       await client.query(
@@ -111,12 +114,24 @@ export async function handleEventFrame(deps: EventFrameDeps, frame: SseFrame): P
         await insertInconsistency(client, event, 'unknown_group_event', verdict.message);
       } else {
         // b) 分发（T-P2-06/08/09 的领域 handler 全须幂等——重复推送/补拉都会重放）
-        await dispatchEvent(deps.registry, { client, event, logger: deps.logger });
+        await dispatchEvent(deps.registry, {
+          client,
+          event,
+          logger: deps.logger,
+          defer: (fn) => deferred.push(fn),
+        });
       }
       // c) 连续前缀游标（UPDATE 只在本事务内——卡片 d）
       await deps.tracker.advanceInTx(eventId, client);
     });
     deps.tracker.commit(eventId); // 内存推进的唯一合法时机：COMMIT 成功之后
+    for (const fn of deferred) {
+      try {
+        fn();
+      } catch (err) {
+        deps.logger.warn({ err, eventId, type }, 'post-commit deferred action failed');
+      }
+    }
   } catch (err) {
     deps.logger.error(
       { err, eventId, type },

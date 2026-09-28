@@ -207,7 +207,12 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         [runId],
       );
       const run = rows[0];
-      if (run === undefined) return { proceed: false }; // 已被并发终态化（取消/恢复）
+      if (run === undefined) {
+        // 读不到 running 行：并发终态化是正常路径，但「事务内拾取 → COMMIT 前抢跑」也会走到这——
+        // 留日志不静默退出（BUGFIX 2026-09-28：e8553884 静默卡死 40min 的教训）
+        deps.logger.warn({ runId }, 'precheck found no running run row; executor exiting');
+        return { proceed: false };
+      }
       // 墙钟记账（§5 逐字公式；停机不计——resume_at 只随进程内步事务推进）
       await client.query(
         `UPDATE agent_run SET
