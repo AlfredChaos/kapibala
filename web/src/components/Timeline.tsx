@@ -2,8 +2,8 @@
 // 形态逐字：items Map<msgId ?? clientMsgId, Row>；WS message 经 mergeTimelineItem 原地 patch；
 // 「加载更早」before 游标栈只向前翻页；WS 未知键 → 重拉首屏窗口 mergeTimelinePage 'top'；
 // sentAt 上移不重排（排序以服务端为准）；own 消息徽标 deliveryStatus（failed/cancelled 含 failCode）。
-import { History, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { History, Loader2, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ApiClient } from '../api/client.js';
 import { isApiError } from '../api/client.js';
 import type { TimelineItem, TimelinePage } from '../lib/api-types.js';
@@ -49,9 +49,13 @@ export function Timeline(props: TimelineProps): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null); // 更早页游标（nextCursor）
   const [loading, setLoading] = useState(false);
+  // 发言人/内容关键词过滤：纯客户端对已加载行生效（REQ §2.1 消息接口无 q 参数——
+  // 不动对外契约，§3.2；未加载的更早行不参与匹配，翻页后自动纳入）
+  const [query, setQuery] = useState('');
   // StrictMode/并发下 ref 读最新 items——useWsEvent handler 经 ref 转发拿到本渲染闭包
   const itemsRef = useRef(items);
   itemsRef.current = items;
+
 
   const loadPage = useCallback(
     async (before: string | undefined, position: 'top' | 'bottom'): Promise<string | null> => {
@@ -135,7 +139,20 @@ export function Timeline(props: TimelineProps): JSX.Element {
     }
   }, [cursor, loading, loadPage]);
 
-  const rows = [...items.values()];
+  const needle = query.trim().toLowerCase();
+  const visibleRows = useMemo(
+    () => {
+      const all = [...items.values()];
+      return needle === ''
+        ? all
+        : all.filter(
+            (r) =>
+              r.text.toLowerCase().includes(needle) ||
+              r.senderPlatformUserId.toLowerCase().includes(needle),
+          );
+    },
+    [items, needle],
+  );
 
   return (
     <section data-testid="timeline">
@@ -148,67 +165,95 @@ export function Timeline(props: TimelineProps): JSX.Element {
           {error}
         </p>
       )}
-      {rows.length === 0 && !loading ? (
-        <EmptyState data-testid="timeline-empty" icon={<History size={20} aria-hidden />}>
-          暂无消息
-        </EmptyState>
+      {/* 搜索框：匹配 text 或 senderPlatformUserId（小写包含匹配，仅作用于已加载行） */}
+      <div className="mb-3 flex items-center gap-2 rounded-md border border-hairline bg-surface-1 px-2.5 py-1.5 focus-within:border-hairline-strong">
+        <Search size={13} className="shrink-0 text-ink-tertiary" aria-hidden />
+        <input
+          type="search"
+          data-testid="timeline-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索发言人或消息内容…"
+          aria-label="搜索时间线消息"
+          className="min-w-0 flex-1 bg-transparent text-xs text-ink placeholder:text-ink-tertiary focus:outline-none"
+        />
+      </div>
+      {visibleRows.length === 0 && !loading ? (
+        needle === '' ? (
+          <EmptyState data-testid="timeline-empty" icon={<History size={20} aria-hidden />}>
+            暂无消息
+          </EmptyState>
+        ) : (
+          <EmptyState data-testid="timeline-no-match" icon={<Search size={20} aria-hidden />}>
+            无匹配消息（搜索仅覆盖已加载的行——「加载更早」可纳入更多历史）
+          </EmptyState>
+        )
       ) : (
-        <ul className="divide-y divide-hairline/60">
-          {rows.map((row) => {
-            const key = rowKeyOf(row);
-            const badge = statusBadge(row);
-            const badgeTone =
-              row.deliveryStatus !== null
-                ? (DELIVERY_TONE[row.deliveryStatus] ?? 'neutral')
-                : 'warn';
-            return (
-              <li
-                key={key ?? row.clientMsgId ?? row.msgId ?? `${row.senderPlatformUserId}:${row.sentAt}`}
-                data-testid={key !== null ? `tl-${key}` : undefined}
-                className="flex items-baseline gap-2 py-2"
-              >
-                <span className="shrink-0 font-mono text-xs text-info">
-                  {row.senderPlatformUserId}
-                </span>
-                {row.isOwn && badge !== '' && (
-                  <span
-                    data-testid={key !== null ? `tl-badge-${key}` : undefined}
-                    className={`shrink-0 font-mono text-[11px] ${
-                      badgeTone === 'danger'
-                        ? 'text-danger'
-                        : badgeTone === 'ok'
-                          ? 'text-ok'
-                          : badgeTone === 'info'
-                            ? 'text-info'
-                            : badgeTone === 'warn'
-                              ? 'text-warn'
-                              : 'text-ink-subtle'
-                    }`}
-                  >
-                    [{badge}]
-                  </span>
-                )}
-                <span className="min-w-0 flex-1 break-words text-sm text-ink-muted">
-                  {row.text}
-                </span>
-                <span className="shrink-0 font-mono text-[11px] text-ink-tertiary">
-                  {row.sentAt}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {cursor !== null && (
-        <button
-          type="button"
-          onClick={() => void loadEarlier()}
-          disabled={loading}
-          className="mt-3 inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-hairline bg-surface-1 px-3 py-1.5 text-xs text-ink-muted transition-colors duration-150 hover:border-hairline-strong hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+        /* 固定视口 + 内部滚动：卡片高度不再随行数无限延展（用户要求 2026-09-28）。
+           「加载更早」留在视口底部——滚动到底即见翻页入口 */
+        <div
+          data-testid="timeline-viewport"
+          className="max-h-[28rem] overflow-y-auto overscroll-contain"
         >
-          {loading && <Loader2 size={12} className="animate-spin" aria-hidden />}
-          {loading ? '加载中…' : '加载更早'}
-        </button>
+          <ul className="divide-y divide-hairline/60">
+            {visibleRows.map((row) => {
+              const key = rowKeyOf(row);
+              const badge = statusBadge(row);
+              const badgeTone =
+                row.deliveryStatus !== null
+                  ? (DELIVERY_TONE[row.deliveryStatus] ?? 'neutral')
+                  : 'warn';
+              return (
+                <li
+                  key={key ?? row.clientMsgId ?? row.msgId ?? `${row.senderPlatformUserId}:${row.sentAt}`}
+                  data-testid={key !== null ? `tl-${key}` : undefined}
+                  className="flex items-baseline gap-2 py-2"
+                >
+                  <span className="shrink-0 font-mono text-xs text-info">
+                    {row.senderPlatformUserId}
+                  </span>
+                  {row.isOwn && badge !== '' && (
+                    <span
+                      data-testid={key !== null ? `tl-badge-${key}` : undefined}
+                      className={`shrink-0 font-mono text-[11px] ${
+                        badgeTone === 'danger'
+                          ? 'text-danger'
+                          : badgeTone === 'ok'
+                            ? 'text-ok'
+                            : badgeTone === 'info'
+                              ? 'text-info'
+                              : badgeTone === 'warn'
+                                ? 'text-warn'
+                                : 'text-ink-subtle'
+                      }`}
+                    >
+                      [{badge}]
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1 break-words text-sm text-ink-muted">
+                    {row.text}
+                  </span>
+                  <span className="shrink-0 font-mono text-[11px] text-ink-tertiary">
+                    {row.sentAt}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {cursor !== null && (
+            <div className="flex justify-center py-2">
+              <button
+                type="button"
+                onClick={() => void loadEarlier()}
+                disabled={loading}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-hairline bg-surface-1 px-3 py-1.5 text-xs text-ink-muted transition-colors duration-150 hover:border-hairline-strong hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading && <Loader2 size={12} className="animate-spin" aria-hidden />}
+                {loading ? '加载中…' : '加载更早'}
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </section>
   );
