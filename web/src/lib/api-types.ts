@@ -103,3 +103,11 @@ export interface SequenceRunView {
   readonly endedAt: string | null;
   readonly steps: SequenceStepView[];
 }
+
+/** GET /api/messages/activity（dashboard「近 30 分钟」柱图基线） */
+export interface ActivityWindow {
+  /** 末桶左端点 epoch ms（前端以它为锚把 buckets 滑到当前时刻） */
+  readonly endMinute: number;
+  readonly bucketMs: number;
+  readonly buckets: readonly number[];
+}

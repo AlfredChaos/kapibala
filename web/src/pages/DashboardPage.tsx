@@ -15,17 +15,18 @@ import {
   TriangleAlert,
   Users,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
 import { isApiError, useAuth } from '../auth/AuthProvider.js';
 import type { AccountListItem } from './AccountsPage.js';
-import type { AgentRunView, GroupView } from '../lib/api-types.js';
-import { bucketize, countAccounts, countGroups, feedEntryOf, type FeedEntry } from '../dashboard/metrics.js';
+import type { ActivityWindow, AgentRunView, GroupView } from '../lib/api-types.js';
+import { countAccounts, countGroups, feedEntryOf, type FeedEntry } from '../dashboard/metrics.js';
 import { cx } from '../ui/cx.js';
 import { BarsChart, MeterRow, StatCard } from '../ui/charts.js';
 import { Card, EmptyState, StatusBadge } from '../ui/primitives.js';
 import { RUN_TONE, toneOf } from '../ui/status.js';
-import { useWsAll } from '../ws/useWsEvent.js';
+import { getWsClient, useWsAll } from '../ws/useWsEvent.js';
+import type { WsClient } from '../ws/WsClient.js';
 
 const FEED_MAX = 24;
 const MSG_TS_MAX = 400;
@@ -34,6 +35,65 @@ const RUN_LIST_MAX = 6;
 /** 需要运营处理的 run 终态（blocked = 审计拦截最优先） */
 const RUN_ATTENTION = ['blocked', 'failed'] as const;
 const RUN_LIVE = ['running', 'pending'] as const;
+
+// 消息活动柱图：
+//   基线 = GET /api/messages/activity（服务端一次 SQL 分桶近 30 分钟，挂载/切页回来都拉）；
+//   增量 = WS message 帧——push 到模块数组（unmount 期间仍在收）。
+// 渲染时把基线桶按 now 重对齐 + 把「晚于 endMinute 的 live ts」叠加进右端桶。
+const MSG_TS: number[] = []; // live 增量（模块级，unmount 不丢）
+let msgCollectorClient: WsClient | null = null;
+const msgTsListeners = new Set<() => void>();
+
+function bumpMsgTs(): void {
+  for (const l of msgTsListeners) l();
+}
+function subscribeMsgTs(onChange: () => void): () => void {
+  msgTsListeners.add(onChange);
+  return () => {
+    msgTsListeners.delete(onChange);
+  };
+}
+function getMsgTsLen(): number {
+  return MSG_TS.length;
+}
+/** 挂全局 tap：ws 就绪即开始收 message 帧；换 client（reset 测试缝）自动换绑 */
+function installMsgTsCollector(): void {
+  const client = getWsClient();
+  if (client === null || msgCollectorClient === client) return;
+  msgCollectorClient = client;
+  client.subscribe('message', () => {
+    MSG_TS.push(Date.now());
+    if (MSG_TS.length > MSG_TS_MAX) MSG_TS.shift();
+    bumpMsgTs();
+  });
+}
+
+/** 基线桶 + live ts → 当前时刻的 buckets 视图（endMinute 锚定，窗口随 now 滑） */
+function liveChartValues(
+  base: ActivityWindow | null,
+  liveTs: readonly number[],
+  nowMs: number,
+  buckets: number,
+): number[] {
+  const bucketMs = base?.bucketMs ?? 60_000;
+  const last = Math.floor(nowMs / bucketMs);
+  const first = last - buckets + 1;
+  const out = new Array<number>(buckets).fill(0);
+  if (base !== null && base.bucketMs === bucketMs && base.buckets.length === buckets) {
+    const shift = Math.floor((last * bucketMs - base.endMinute) / bucketMs);
+    for (let i = 0; i < buckets; i += 1) {
+      const src = i - shift;
+      if (src >= 0 && src < base.buckets.length) out[i] = base.buckets[src] ?? 0;
+    }
+  }
+  const coveredUntil = base === null ? 0 : base.endMinute + bucketMs;
+  for (const t of liveTs) {
+    if (t < coveredUntil) continue; // 基线已经算过这条
+    const b = Math.floor(t / bucketMs);
+    if (b >= first && b <= last) out[b - first] = (out[b - first] ?? 0) + 1;
+  }
+  return out;
+}
 
 function errorText(err: unknown): string {
   if (isApiError(err)) return `${err.code}：${err.message}`;
@@ -50,11 +110,13 @@ export function DashboardPage(): JSX.Element {
   const [groups, setGroups] = useState<GroupView[] | null>(null);
   const [runs, setRuns] = useState<AgentRunView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<ActivityWindow | null>(null);
 
   // 实时层（ws 帧驱动；不进 React state 的原始计数走 ref——渲染由 feed tick 顺带触发）
   const [feed, setFeed] = useState<FeedEntry[]>([]);
-  const msgTs = useRef<number[]>([]);
-  const [msgTimestamps, setMsgTimestamps] = useState<number>(0); // bump 触发 chart 重算
+  // msgTs 模块数组 + bump 都靠 useSyncExternalStore 收口（setMsgTimestamps 已不需要）
+  useSyncExternalStore(subscribeMsgTs, getMsgTsLen);
+  const msgTs = MSG_TS; // 模块数组——组件只读，写入在全局收集器
   // runsRef：WS 回调里读最新 runs（判定未知 run → 重拉），不靠渲染闭包
   const runsRef = useRef<AgentRunView[] | null>(null);
   runsRef.current = runs;
@@ -96,18 +158,31 @@ export function DashboardPage(): JSX.Element {
     })();
   }, [reloadSnapshots]);
 
+  // mount 拉基线（服务端权威 sent_at，含 unmount 期间的数据）
+  useEffect(() => {
+    void (async () => {
+      try {
+        setActivity(await client.request<ActivityWindow>('/api/messages/activity'));
+      } catch {
+        /* 基线失败不阻断 dashboard——live 层照样画 */
+      }
+    })();
+  }, [client]);
+
   // groups 就绪后才拉 run 明细（依赖快照而不是先拉——两次往返串行，省一轮空跑）
   useEffect(() => {
     if (groups !== null) void reloadRuns(groups);
   }, [groups, reloadRuns]);
 
+  // 装配全局收集器：组件挂载即触发；卸载后仍然收帧（msgTs 不再清）
+  useEffect(() => {
+    installMsgTsCollector();
+  }, []);
+
   useWsAll((frame) => {
     const at = Date.now();
-    if (frame.type === 'message') {
-      msgTs.current.push(at);
-      if (msgTs.current.length > MSG_TS_MAX) msgTs.current.shift();
-      setMsgTimestamps((n) => n + 1);
-    }
+    // message 帧的 push/持久化在模块收集器；这里只 bump 触发 chart 重算
+    if (frame.type === 'message') bumpMsgTs();
     setFeed((prev) => [feedEntryOf(frame, at), ...prev].slice(0, FEED_MAX));
     // 结构性帧 → 快照重拉（与详情页同一「事件驱动 invalidate」策略）
     if (
@@ -149,9 +224,8 @@ export function DashboardPage(): JSX.Element {
   const liveRuns = (runs ?? []).filter((r) =>
     (RUN_LIVE as readonly string[]).includes(r.status),
   ).length;
-  const chartValues = bucketize(msgTs.current, Date.now(), BUCKETS);
-  const msgTotal = msgTs.current.length;
-  void msgTimestamps; // bump 引用——chartValues 已即时重算
+  const chartValues = liveChartValues(activity, msgTs, Date.now(), BUCKETS);
+  const msgTotal = chartValues.reduce((a, b) => a + b, 0);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-5 py-6">
