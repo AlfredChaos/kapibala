@@ -10,6 +10,7 @@
 import type { Pool, PoolClient } from 'pg';
 import type { ToolOutcome } from '../executor.js';
 import { consumeIdempotencyKey, lookupIdempotencyKey } from '../idempotency.js';
+import { tx } from '../../../db/tx.js';
 
 export const SEND_MESSAGE_DELIVERY_WAIT_MS = 5000; // §2.2「至多 5 秒」契约数字
 const SEND_MESSAGE_POLL_MS = 50; // 等待轮询粒度【设计值】（5s 窗口内 100 次探测足够细）
@@ -122,8 +123,8 @@ export interface SendMessageDeps {
 
 /**
  * send_message 主流程。前置：tool_use 合法形 + 审计 pass（executor 已保证）。
- * client 形参 = executor 的事务步上下文；本函数内部自起事务段只用于 T13 与查询——
- * 为保「key+message+step 同事务」原子性，T13 直接在传入 client 上执行（调用方事务内）。
+ * ctx.client 是普通池连接（autocommit，executor 不包事务）；T13 三件套（step 凭据 + 幂等
+ * key + queued 消息）在本函数内部自起 tx() 提交后才进入 5s 投递等待。
  */
 export async function execSendMessage(
   ctx: { client: PoolClient; runId: string; groupId: string; stepSeq: number; input: unknown },
@@ -176,23 +177,27 @@ export async function execSendMessage(
     };
   }
 
-  // ④ T13 事务（在调用方 client 内）：step tool_dispatched + client_msg_id + 幂等 key 行
-  //    + message(queued, source='agent')——key 消耗与消息创建同事务（E13）
+  // ④ T13 事务（自起 tx()，不再借调用方事务）：step tool_dispatched + client_msg_id +
+  //    幂等 key 行 + message(queued, source='agent') 同生共死（E13）。
+  //    **必须先提交再等待**：行不提交，waiter 轮询与出站 dispatcher 都看不见它——
+  //    原实现把这三写留在调用方 tx 里再轮询，必然耗满 5s 假 SEND_TIMEOUT（send-message-delivery.test.ts 回归）。
   const clientMsgId = `cm-${ctx.runId}-${ctx.stepSeq}-${key}`.slice(0, 200);
-  await ctx.client.query(
-    `UPDATE agent_run_step SET status='tool_dispatched', audit_verdict='pass',
-            client_msg_id=$3, updated_at=now()
-     WHERE run_id=$1 AND seq=$2`,
-    [ctx.runId, ctx.stepSeq, clientMsgId],
-  );
-  await consumeIdempotencyKey(ctx.client, { runId: ctx.runId, key, clientMsgId });
-  await ctx.client.query(
-    `INSERT INTO message (group_id, msg_id, client_msg_id, sender_platform_user_id, is_own, source,
-                          text, sent_at, delivery_status, account_id)
-     SELECT $1, NULL, $2, a.platform_user_id, true, 'agent', $3, now(), 'queued', a.id
-     FROM account a WHERE a.id=$4`,
-    [ctx.groupId, clientMsgId, text, accountId],
-  );
+  await tx(deps.pool, async (client) => {
+    await client.query(
+      `UPDATE agent_run_step SET status='tool_dispatched', audit_verdict='pass',
+              client_msg_id=$3, updated_at=now()
+       WHERE run_id=$1 AND seq=$2`,
+      [ctx.runId, ctx.stepSeq, clientMsgId],
+    );
+    await consumeIdempotencyKey(client, { runId: ctx.runId, key, clientMsgId });
+    await client.query(
+      `INSERT INTO message (group_id, msg_id, client_msg_id, sender_platform_user_id, is_own, source,
+                            text, sent_at, delivery_status, account_id)
+       SELECT $1, NULL, $2, a.platform_user_id, true, 'agent', $3, now(), 'queued', a.id
+       FROM account a WHERE a.id=$4`,
+      [ctx.groupId, clientMsgId, text, accountId],
+    );
+  });
 
   // ⑤ 等 accepted/sent 至多 5s（§2.2）；期间账号终态→消息被终态取消流程标 failed→SEND_FAILED
   const settled = await (deps.waiter ?? defaultDeliveryWaiter)(
