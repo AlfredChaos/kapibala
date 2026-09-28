@@ -42,8 +42,20 @@ export async function registerGroupStateRoutes(app: App, deps: RouteDeps): Promi
         [id, agentEnabled ?? null, autoKickEnabled ?? null],
       );
       if (rowCount !== 1) return false;
+      // payload 必须带 post-update 值——前端 useWsEvent 用 f.payload.agentEnabled/autoKickEnabled
+      // 就地覆盖；漏字段 → undefined → checkbox 变 uncontrolled，UI 卡旧值。
+      const updated2 = await client.query<{ status: string; agent_enabled: boolean; auto_kick_enabled: boolean }>(
+        'SELECT status, agent_enabled, auto_kick_enabled FROM "group" WHERE id=$1',
+        [id],
+      );
+      const row = updated2.rows[0];
       await client.query("INSERT INTO ws_event (type, payload) VALUES ('group_updated', $1::jsonb)", [
-        JSON.stringify({ groupId: id }),
+        JSON.stringify({
+          groupId: id,
+          status: row?.status,
+          agentEnabled: row?.agent_enabled,
+          autoKickEnabled: row?.auto_kick_enabled,
+        }),
       ]);
       return true;
     });
