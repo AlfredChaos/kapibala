@@ -82,6 +82,7 @@
 | 24 | 乱序窗口内时间线短暂两行 | 已知瞬态，契约「一行」按稳态解释（D3-5） | [05](05-messaging-module.md) §4.3 |
 | 25 | 不匹配字符集的花括号（序列模板） | 按字面量文本处理 | [07](07-sequence-module.md) §2.1 |
 | 26 | run 结束/兜底补建 run 时群已 unreachable 或 agentEnabled 关闭 | 不补建 run；积压的 trigger_queue 行保留，agentEnabled 重新打开后由 SWEEP 补建（实现『重新启用后补处理』） | [06](06-agent-module.md) §2 |
+| 27 | `GET /api/sequences` 定义列表端点 | [15](15-web-console.md) §2 页面 5 数据源行要求「GET（定义列表）」，QR §1 端点表未列——视为契约空隙补全；响应形状沿用 `GET /api/groups` 的裸数组包络惯例（读路径 viewer 可访问） | [15](15-web-console.md) §2、[07](07-sequence-module.md) §1 |
 
 ## 设计约定（全目录通用）
 
