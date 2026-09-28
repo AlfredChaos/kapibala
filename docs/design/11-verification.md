@@ -93,7 +93,7 @@
 | A0-1 | 迁移可重复执行；schema 落后拒绝启动 | [01](01-architecture.md) §6.4、[10](10-reliability.md) §3 | ✅ | 落后与超前均拒绝 |
 | A0-2 | 错误响应格式 | [01](01-architecture.md) §6.3 | ✅ | |
 | A0-3 | login 返回 access；viewer 写操作 403 | [09](09-auth-module.md) §2、§4 | ✅ | 接口层兜底（前端隐藏仅展示层） |
-| A1-1 | 转移表逐格（15 条合法边）；表外（含同态）ILLEGAL_TRANSITION | [03](03-account-module.md) §1 | ✅ | |
+| A1-1 | 转移表逐格（16 条合法边——2026-09-28 起含 disconnected→online，按 REQ 网格字面回拨）；表外（含同态）ILLEGAL_TRANSITION | [03](03-account-module.md) §1 | ✅ | |
 | A1-2 | 终态无出边、重连不可恢复；重复进终态静默忽略 | [03](03-account-module.md) §1 | ✅ | 条件更新实现幂等 |
 | A1-3 | rateLimitedUntil 刷新不算转移 | [03](03-account-module.md) §5.1 | ✅ | |
 | A1-4 | 并发至多一个成功、409 CAS_CONFLICT、后写不覆盖 | [03](03-account-module.md) §3 | ✅ | 条件 UPDATE rowcount 判定 |

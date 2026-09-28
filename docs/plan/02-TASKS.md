@@ -236,14 +236,14 @@
   e) VITEST 行 D1-1/D3-1/A2-5 登记应勾
 
 ### T-P2-05 账号状态机 + connect / transition 端点            [status: DONE]
-- goal: `transitions.ts` 15 条合法边集中定义；`enterTerminal` 幂等入口；connect（前置 {idle,disconnected}，先调网关后落库）；transition 三段式判定（400→404→ILLEGAL_TRANSITION→CAS_CONFLICT）+ disconnect 补调；`GET /api/accounts`。
+- goal: `transitions.ts` 16 条合法边集中定义（REQ A1 网格逐格——2026-09-28 含 disconnected→online 回拨）；`enterTerminal` 幂等入口；connect（前置 {idle,disconnected}，先调网关后落库）；transition 三段式判定（400→404→ILLEGAL_TRANSITION→CAS_CONFLICT）+ disconnect 补调；`GET /api/accounts`。
 - refs: DES/03-account-module.md §1–§3、§6；REQ §2.3 账号行、A1；QR §4、§6
 - owned: server/src/modules/accounts/**（transitions.ts、connect.ts、transition.ts、list.ts）、server/src/http/routes/accounts.ts（+index 注册行）、server/tests/accounts/state-machine.test.ts、server/tests/accounts/transition.test.ts
 - depends: T-P0-07、T-P2-02；lane: A
 - size: M
 - acceptance:
   a) `pnpm -F server test tests/accounts/state-machine.test.ts tests/accounts/transition.test.ts` → 全绿
-  b) GWT：Given 转移不在 A1 表上（含同态→同态，如 online→online），Then `409 ILLEGAL_TRANSITION`；15 条合法边逐条可走通（A1 转移表逐格）；Given `expectedFrom` ≠ 当前状态，Then `409 CAS_CONFLICT` 且后写不覆盖先写（并发注入两请求恰一成功，I5）；Given 不存在账号，Then `404 ACCOUNT_NOT_FOUND`；Given `to='rate_limited'` 缺 `rateLimitedUntil`（或非未来时刻），Then `400 VALIDATION_ERROR`（D3-4）；Given connect 时账号为 rate_limited，Then `409 ILLEGAL_TRANSITION`（前置从严解读 #1）；connect 成功 → `200 {status:'online', platformUserId}`；标 disconnected/idle 落库后调网关 disconnect（崩溃由恢复器补调，E10）
+  b) GWT：Given 转移不在 A1 表上（含同态→同态，如 online→online），Then `409 ILLEGAL_TRANSITION`；16 条合法边逐条可走通（A1 转移表逐格）；Given `expectedFrom` ≠ 当前状态，Then `409 CAS_CONFLICT` 且后写不覆盖先写（并发注入两请求恰一成功，I5）；Given 不存在账号，Then `404 ACCOUNT_NOT_FOUND`；Given `to='rate_limited'` 缺 `rateLimitedUntil`（或非未来时刻），Then `400 VALIDATION_ERROR`（D3-4）；Given connect 时账号为 rate_limited，Then `409 ILLEGAL_TRANSITION`（前置从严解读 #1）；connect 成功 → `200 {status:'online', platformUserId}`；标 disconnected/idle 落库后调网关 disconnect（崩溃由恢复器补调，E10）
   c) 新增两测试文件（含并发 CAS 注入）；先红后绿记录
   d) 判定顺序与 §2.3 错误码语义一致（静态 ILLEGAL 先于 CAS）；CAS 全部条件 UPDATE rowcount 判定；无 any
   e) VITEST 行 I5、D3-4、A-03/04/05、A1-1/2/4 登记应勾

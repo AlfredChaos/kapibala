@@ -20,8 +20,8 @@ import {
   type AccountStatusValue,
 } from '../../src/modules/accounts/transitions.js';
 
-// A1 转移表（REQ 网格 16 ✔ 减去 connect 专属的 disconnected→online；DES/03 §1「合法转移 15 条」
-// + 设计 11 A1-1 同口径——connect 边不经 applyTransition，故 API 判定表不含它）
+// A1 转移表（REQ 网格 16 ✔ 逐格，含 disconnected→online——transition 是纯标记操作，
+// 不调网关 connect；真实重连仍走 POST /connect。REQ 未给「connect 专属边」豁免，按字面对齐）
 const A1_LEGAL: ReadonlyArray<readonly [AccountStatusValue, AccountStatusValue]> = [
   ['idle', 'online'],
   ['idle', 'suspended'],
@@ -36,21 +36,22 @@ const A1_LEGAL: ReadonlyArray<readonly [AccountStatusValue, AccountStatusValue]>
   ['rate_limited', 'suspended'],
   ['rate_limited', 'session_expired'],
   ['disconnected', 'idle'],
+  ['disconnected', 'online'],
   ['disconnected', 'suspended'],
   ['disconnected', 'session_expired'],
 ];
 
 describe('转移表 transitions.ts（A1 逐格；同态→同态非法）', () => {
-  it('合法边集合 = 15 条（REQ 网格扣除 connect 专属 disconnected→online）', () => {
+  it('合法边集合 = 16 条（REQ 网格逐格，含 disconnected→online）', () => {
     for (const [from, to] of A1_LEGAL) {
       expect(isLegalTransition(from, to), `${from}→${to}`).toBe(true);
     }
     expect(LEGAL_TRANSITIONS.size).toBe(A1_LEGAL.length);
-    // connect 专属边显式非法（操作员 transition 不可标 online——无网关补偿路径）
-    expect(isLegalTransition('disconnected', 'online')).toBe(false);
+    // disconnected→online 现在是合法标记转移（REQ A1 网格 ✔；此前收窄已回拨）
+    expect(isLegalTransition('disconnected', 'online')).toBe(true);
   });
 
-  it('同态→同态与其余组合全非法（6×6 − 15 = 21 条）', () => {
+  it('同态→同态与其余组合全非法（6×6 − 16 = 20 条）', () => {
     const all: AccountStatusValue[] = [
       'idle',
       'online',

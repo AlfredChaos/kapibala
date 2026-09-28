@@ -1,6 +1,6 @@
 // 账号状态转移表面（T-P5-03；DES/15 §2 页面 2、DES/03 §1、REQ A1）。
-// 真值在 server/src/modules/accounts/transitions.ts 的 LEGAL_TRANSITIONS（15 条合法边；
-// disconnected→online 属 connect 专属不在表内）；这里是纯数据镜像——
+// 真值在 server/src/modules/accounts/transitions.ts 的 LEGAL_TRANSITIONS（16 条合法边，
+// 含 disconnected→online——REQ A1 网格逐格，transition 为纯标记；真实重连仍走 connect）；这里是纯数据镜像——
 // tests/accounts-page.test.tsx 直接 import 服务端表做逐边对照（卡片 d：同源校验）。
 // UI 只用两个导出：legalTargets(from) 列出转移面板可选目标；CONNECT_FROM 控 connect 可见性。
 import type { AccountStatus } from '@kapibala/contract';
@@ -22,6 +22,7 @@ export const LEGAL_TRANSITIONS_WEB: ReadonlySet<string> = new Set(
       ['rate_limited', 'suspended'],
       ['rate_limited', 'session_expired'],
       ['disconnected', 'idle'],
+      ['disconnected', 'online'],
       ['disconnected', 'suspended'],
       ['disconnected', 'session_expired'],
     ] as const
