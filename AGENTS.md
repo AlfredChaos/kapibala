@@ -100,3 +100,10 @@ docs/            需求与拆解
 - 根因：连接水位直接采信客户端 sinceSeq；回放集为空时水位停在未来 seq，后续所有提交 seq < 水位永远被过滤——自陷死锁
 - 修复：`lastSentSeq = min(sinceSeq, maxSeq)`（钳制到真实 max；最坏多收 ≤ 窗口行，幂等吸收）
 - 防再犯：回归测试 server/tests/ws/sinceseq.test.ts（「sinceSeq beyond current max」用例）；同提交修复 sinceSeq=0 误报 ws_backlog_expired（0 是全量回放哨兵不是被清行，BIGSERIAL 从 1 起）
+
+### 2026-09-28 agent run 建而未拾取 → 永久卡 running 堵死单飞行
+- 症状：`activeAgentRunId` 长期非空、`agent_trigger_queue` 积压只增不减、run 永远 `step_count=0`
+- 根因：`trigger-entry.ts` 在事件事务内（COMMIT 前）调 `startAgentRun` → executor 抢到 advisory lock 但读不到未提交的 run 行，`precheck` 静默退出；`uq_agent_run_single_flight` 又阻止补建，run 永久卡死（竞态窗口极小，偶发）
+- 修复：`EventDispatchContext.defer` 提交后副作用缝（consumer 在 commit 后统一触发）；`trigger-sweep` 加 stale-run lane：`status='running' AND (lease_until IS NULL OR lease_until < now())` 重新 `startAgentRun`（advisory lock 互斥，幂等）
+- 防再犯：事务内禁止直接触发「需要读到本事务行」的异步动作，一律经 defer；executor/恢复路径对 `precheck` 读不到行的 run 要 log 不能静默 return
+

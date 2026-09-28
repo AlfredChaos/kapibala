@@ -36,6 +36,17 @@ export function registerTriggerSweepScan(deps: TriggerSweepDeps): void {
       return 0;
     }
     lastRun = now;
+    // lane 0（BUGFIX 2026-09-28）：status='running' 但 executor 已不在位（lease 过期/未认领）→
+    //   重新 startAgentRun。场景：事务内直调拾取导致 COMMIT 前读不到行的 run（已实证 e8553884
+    //   永久卡 running 并堵死单飞行）。重拾取靠 executor advisory lock 互斥，重复唤醒幂等。
+    const { rows: stale } = await deps.pool.query<{ id: string }>(
+      `SELECT id FROM agent_run
+       WHERE status='running' AND (lease_until IS NULL OR lease_until < now())`,
+    );
+    for (const r of stale) {
+      deps.logger.warn({ runId: r.id }, 'trigger sweep: re-queuing unclaimed/stale-lease run');
+      startAgentRun(r.id);
+    }
     // 本轮目标集：有积压且无 running run 的群（每群独立事务——一群失败不拖整轮）
     let created = 0;
     const { rows: groups } = await deps.pool.query<{ group_id: string }>(

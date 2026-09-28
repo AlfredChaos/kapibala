@@ -41,6 +41,7 @@ export function createMessageHandler(): EventHandler {
       ctx.client,
       p as unknown as GatewayMessageEvent,
       ctx.logger,
+      ctx.defer,
     );
     if (outcome === 'skipped') {
       warn(ctx, { eventId: ctx.event.eventId }, 'inbound message skipped by projection guard');

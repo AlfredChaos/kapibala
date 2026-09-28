@@ -26,6 +26,13 @@ export interface EventDispatchContext {
   readonly client: PoolClient;
   readonly event: GatewayEventEnvelope;
   readonly logger: DispatchLogger;
+  /**
+   * 提交后副作用缝（BUGFIX 2026-09-28）：handler 里需要「事务已落库后才发生」的动作
+   * （当前唯一用途：agent run 建好后拾取 executor），必须走它而不能在事务内直接调——
+   * 事务内调用会让对端在 COMMIT 前读不到新行（advisory lock 抢到但 UPDATE 命中 0 行 →
+   * run 永久卡 running）。consumer 在游标推进/事件提交成功后逐个触发。
+   */
+  readonly defer?: (fn: () => void) => void;
 }
 
 export type EventHandler = (ctx: EventDispatchContext) => Promise<void>;

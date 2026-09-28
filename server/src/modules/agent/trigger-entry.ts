@@ -36,7 +36,16 @@ export type TriggerOutcome = 'run_created' | 'queued' | 'skipped';
  */
 export async function tryTriggerAgentRun(
   client: PoolClient,
-  args: { group: TriggerGroupContext; message: TriggerMessageInput },
+  args: {
+    group: TriggerGroupContext;
+    message: TriggerMessageInput;
+    /**
+     * 提交后拾取缝（BUGFIX 2026-09-28）：run 在事务内建好但 COMMIT 前对外不可见——
+     * 必须经它登记（consumer 在 commit 后触发），不能直接 startAgentRun，
+     * 否则 executor 抢锁后读不到行 → run 永久卡 running（已实证 e8553884）。
+     */
+    defer?: (fn: () => void) => void;
+  },
 ): Promise<TriggerOutcome> {
   const { group, message } = args;
   if (group.status !== 'active' || !group.agentEnabled) {
@@ -80,6 +89,8 @@ export async function tryTriggerAgentRun(
     "INSERT INTO ws_event (type, payload) VALUES ('agent_run', $1::jsonb)",
     [JSON.stringify({ runId, groupId: group.id, status: 'running', endReason: null })],
   );
-  startAgentRun(runId); // executor 拾取占位缝（T-P4-05 接管 §2.1）
+  // executor 拾取必须晚于本事务 COMMIT——走 defer 缝；缺 defer 的调用方（测试/恢复路径）回退到直调
+  const start = (): void => startAgentRun(runId);
+  if (args.defer !== undefined) args.defer(start); else start();
   return 'run_created';
 }
