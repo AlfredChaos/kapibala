@@ -21,6 +21,7 @@ pnpm lint && pnpm typecheck # 全仓 lint + 类型检查
 pnpm build                  # 全仓构建
 pnpm -F server db:migrate   # 执行迁移（dev 启动时自动跑；此命令用于显式排查）
 pnpm -F server db:seed      # 预置服务账号与 admin / viewer 用户（幂等）
+pnpm -F server db:seed-demo  # 往运行中的 dev 栈写演示数据（2 群 + 2 序列；走公共 API，幂等；需 pnpm dev 在跑）
 pnpm demo:s1 … demo:s8      # 场景演示（独立隔离环境，可与之并行；见 scripts/README.md）
 pnpm e2e                    # C3 单条 Playwright 冒烟（占 :3000/:5173——先停 pnpm dev）
 ```
