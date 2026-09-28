@@ -3,7 +3,10 @@
 // auditVerdict / rawResponse（折叠）。协议错误步：toolUseId/name/input 为 null →
 // 渲染 null 语义（「—」）+ errorCode 醒目；rawResponse <details> 折叠
 // （后端已 ≤2KB 截断，直接渲染——卡片 d 逐字）。
+import { ChevronRight } from 'lucide-react';
 import type { AgentRunStepView } from '../lib/api-types.js';
+import { cx } from '../ui/cx.js';
+import { EmptyState, StatusBadge, Tag } from '../ui/primitives.js';
 
 /** input 折叠渲染（对象 → JSON 文本；null → 「—」占位） */
 function renderInput(input: unknown): string {
@@ -15,57 +18,76 @@ function renderInput(input: unknown): string {
   }
 }
 
+const KIND_TONE: Record<string, 'ok' | 'warn' | 'danger' | 'info' | 'neutral'> = {
+  tool_use: 'info',
+  final: 'ok',
+  protocol_error: 'danger',
+};
+
 function StepRow(props: { step: AgentRunStepView }): JSX.Element {
   const s = props.step;
   const isProtocolError = s.kind === 'protocol_error' || s.errorCode !== null;
+  const danger = isProtocolError || s.isError;
   return (
     <li
       data-testid={`step-${s.seq}`}
       data-kind={s.kind}
-      data-error={s.isError || isProtocolError ? 'true' : undefined}
-      style={{
-        padding: '0.5rem 0.6rem',
-        borderBottom: '1px solid #eee',
-        borderLeft: isProtocolError || s.isError ? '4px solid #c00' : undefined,
-        background: isProtocolError ? '#fdecec' : undefined,
-      }}
+      data-error={danger ? 'true' : undefined}
+      className={cx(
+        'rounded-md border border-hairline bg-surface-2/40 px-3 py-2.5',
+        danger && 'border-danger/50 bg-danger/10',
+      )}
     >
-      <div>
-        <strong>#{s.seq}</strong>
-        <span style={{ marginLeft: '0.5rem' }} data-testid={`step-kind-${s.seq}`}>
-          {s.kind}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface-3 font-mono text-[10px] text-ink-subtle">
+          {s.seq}
         </span>
-        {s.name !== null && (
-          <span style={{ marginLeft: '0.5rem', fontFamily: 'monospace' }}>{s.name}</span>
-        )}
+        <StatusBadge tone={KIND_TONE[s.kind] ?? 'neutral'} data-testid={`step-kind-${s.seq}`}>
+          {s.kind}
+        </StatusBadge>
+        {s.name !== null && <Tag>{s.name}</Tag>}
         {s.isError && (
-          <span style={{ marginLeft: '0.5rem', color: '#c00' }}>isError</span>
+          <span className="rounded-sm bg-danger/15 px-1.5 py-0.5 text-[11px] font-medium text-danger">
+            isError
+          </span>
         )}
         {s.errorCode !== null && (
           <span
             data-testid={`step-errorcode-${s.seq}`}
-            style={{ marginLeft: '0.5rem', color: '#c00', fontWeight: 'bold' }}
+            className="rounded-sm border border-danger/50 bg-danger/15 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-danger"
           >
             {s.errorCode}
           </span>
         )}
         {s.auditVerdict !== null && (
-          <span data-testid={`step-audit-${s.seq}`} style={{ marginLeft: '0.5rem', color: '#a60' }}>
+          <span
+            data-testid={`step-audit-${s.seq}`}
+            className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${
+              s.auditVerdict === 'pass' ? 'bg-ok/15 text-ok' : 'bg-warn/15 text-warn'
+            }`}
+          >
             audit:{s.auditVerdict}
           </span>
         )}
       </div>
       {/* 协议错误步逐字：toolUseId/name/input = null 的呈现 */}
-      <div style={{ fontSize: '0.85em', color: '#666' }}>
+      <div className="mt-1.5 break-all font-mono text-[11px] leading-5 text-ink-subtle">
         toolUseId={s.toolUseId ?? 'null'} · input={renderInput(s.input)}
       </div>
       {s.resultSummary !== null && (
-        <div style={{ fontSize: '0.9em', marginTop: '0.2rem' }}>{s.resultSummary}</div>
+        <div className="mt-1 text-xs text-ink-muted">{s.resultSummary}</div>
       )}
       {s.rawResponse !== null && (
-        <details data-testid={`step-raw-${s.seq}`}>
-          <summary>rawResponse</summary>
-          <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.8em', margin: '0.3rem 0' }}>
+        <details data-testid={`step-raw-${s.seq}`} className="group/raw mt-1.5">
+          <summary className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-ink-subtle transition-colors duration-150 hover:text-ink">
+            <ChevronRight
+              size={12}
+              className="transition-transform duration-150 group-open/raw:rotate-90"
+              aria-hidden
+            />
+            rawResponse
+          </summary>
+          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap rounded-sm border border-hairline bg-canvas p-2 font-mono text-[11px] leading-5 text-ink-muted">
             {s.rawResponse}
           </pre>
         </details>
@@ -76,10 +98,10 @@ function StepRow(props: { step: AgentRunStepView }): JSX.Element {
 
 export function StepList(props: { steps: AgentRunStepView[] }): JSX.Element {
   if (props.steps.length === 0) {
-    return <p data-testid="steps-empty">暂无步骤</p>;
+    return <EmptyState data-testid="steps-empty">暂无步骤</EmptyState>;
   }
   return (
-    <ol data-testid="step-list" style={{ listStyle: 'none', padding: 0 }}>
+    <ol data-testid="step-list" className="flex flex-col gap-2">
       {props.steps.map((s) => (
         <StepRow key={s.seq} step={s} />
       ))}

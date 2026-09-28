@@ -11,11 +11,13 @@
 //   （INVITE_NOT_READY 等失败码不转译）。
 // 时间戳列：当前 GET /api/groups 不输出 createdAt（server query.ts §5 输出形状逐字）——
 //   列保留、缺值渲染「—」，后端补字段后自动生效。
+import { Check, Loader2, MessageSquare, Plus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { canWrite, isApiError, useAuth } from '../auth/AuthProvider.js';
 import type { GroupView } from '../lib/api-types.js';
-
+import { Button, Card, EmptyState, Field, Select, StatusBadge } from '../ui/primitives.js';
+import { GROUP_TONE, toneOf } from '../ui/status.js';
 /** 建群 job 轮询节拍（~1s；测试经 props 注入 0 走即实轮询） */
 const JOB_POLL_MS = 1000;
 /** 轮询上限：超出仍在 running → 提示但不判失败（恢复器可能还在推进） */
@@ -184,125 +186,193 @@ export function GroupsPage(props: { jobPollMs?: number }): JSX.Element {
   }
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: '60rem', margin: '2rem auto' }}>
-      <h1>群列表</h1>
+    <main className="mx-auto w-full max-w-5xl px-5 py-6">
+      <div className="mb-5 flex items-end justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">群</h1>
+          <p className="mt-0.5 text-xs text-ink-subtle">群列表 — 点行进详情</p>
+        </div>
+      </div>
       {error !== null && (
-        <p role="alert" style={{ color: '#b00' }}>
+        <p
+          role="alert"
+          className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
           {error}
         </p>
       )}
-      {groups === null ? (
-        <p>加载中…</p>
-      ) : groups.length === 0 ? (
-        <p>无群</p>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
-              <th>ID</th>
-              <th>gatewayGroupId</th>
-              <th>状态</th>
-              <th>成员数</th>
-              <th>agent</th>
-              <th>autoKick</th>
-              <th>创建时间</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((g) => (
-              <tr
-                key={g.id}
-                data-testid={`group-row-${g.id}`}
-                style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}
-                onClick={() => navigate(`/groups/${g.id}`)}
-              >
-                <td>
-                  <Link to={`/groups/${g.id}`}>{g.id.slice(0, 8)}</Link>
-                </td>
-                <td>{g.gatewayGroupId ?? '—'}</td>
-                <td>
-                  <span data-testid={`group-status-${g.id}`}>{g.status}</span>
-                </td>
-                <td>{g.members.length}</td>
-                <td>{g.agentEnabled ? '✓' : '—'}</td>
-                <td>{g.autoKickEnabled ? '✓' : '—'}</td>
-                <td>{g.createdAt != null ? formatTimestamp(g.createdAt) : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
+        <div className="min-w-0">
+          {groups === null ? (
+            <p className="py-10 text-center text-sm text-ink-subtle">加载中…</p>
+          ) : groups.length === 0 ? (
+            <EmptyState icon={<MessageSquare size={20} aria-hidden />}>无群</EmptyState>
+          ) : (
+            <Card className="overflow-hidden p-0">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-left text-xs text-ink-subtle">
+                    <th className="px-4 py-2.5 font-medium">ID</th>
+                    <th className="px-4 py-2.5 font-medium">gatewayGroupId</th>
+                    <th className="px-4 py-2.5 font-medium">状态</th>
+                    <th className="px-4 py-2.5 font-medium">成员数</th>
+                    <th className="px-4 py-2.5 font-medium">agent</th>
+                    <th className="px-4 py-2.5 font-medium">autoKick</th>
+                    <th className="px-4 py-2.5 font-medium">创建时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.map((g) => (
+                    <tr
+                      key={g.id}
+                      data-testid={`group-row-${g.id}`}
+                      className="cursor-pointer border-b border-hairline/60 transition-colors duration-150 last:border-b-0 hover:bg-surface-2"
+                      onClick={() => navigate(`/groups/${g.id}`)}
+                    >
+                      <td className="px-4 py-2.5 font-mono text-xs">
+                        <Link
+                          to={`/groups/${g.id}`}
+                          className="text-info hover:text-primary-hover hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {g.id.slice(0, 8)}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-ink-subtle">
+                        {g.gatewayGroupId ?? '—'}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <StatusBadge
+                          tone={toneOf(GROUP_TONE, g.status)}
+                          data-testid={`group-status-${g.id}`}
+                        >
+                          {g.status}
+                        </StatusBadge>
+                      </td>
+                      <td className="px-4 py-2.5 text-ink-muted">{g.members.length}</td>
+                      <td className="px-4 py-2.5">
+                        {g.agentEnabled ? (
+                          <Check size={14} className="text-ok" aria-hidden />
+                        ) : (
+                          <span className="text-ink-tertiary">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {g.autoKickEnabled ? (
+                          <Check size={14} className="text-ok" aria-hidden />
+                        ) : (
+                          <span className="text-ink-tertiary">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-ink-subtle">
+                        {g.createdAt != null ? formatTimestamp(g.createdAt) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+        </div>
 
-      {writable && (
-        <section
-          data-testid="create-group-form"
-          style={{ border: '1px solid #ddd', padding: '0.8rem', marginTop: '1.2rem' }}
-        >
-          <h3>建群</h3>
-          <label>
-            群主账号（creator）：
-            <select
-              data-testid="create-creator"
-              value={creator}
-              onChange={(e) => setCreator(e.target.value)}
-            >
-              <option value="">—</option>
-              {onlineAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.platformUserId ?? a.id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <fieldset style={{ marginTop: '0.6rem' }}>
-            <legend>成员账号（memberAccountIds，online，不含群主）</legend>
-            {memberCandidates.length === 0 ? (
-              <span data-testid="create-no-members">（无可选 online 账号）</span>
-            ) : (
-              memberCandidates.map((a) => (
-                <label key={a.id} style={{ marginRight: '0.8rem' }}>
-                  <input
-                    type="checkbox"
-                    data-testid={`create-member-${a.id}`}
-                    checked={members.has(a.id)}
-                    onChange={() => toggleMember(a.id)}
-                  />
-                  {a.platformUserId ?? a.id}
-                </label>
-              ))
-            )}
-          </fieldset>
-          <button
-            type="button"
-            data-testid="create-submit"
-            disabled={jobId !== null}
-            onClick={() => void createGroup()}
-          >
-            建群
-          </button>
-          {jobId !== null && (
-            <span data-testid="create-progress" style={{ marginLeft: '0.8rem' }}>
-              建群中…（jobId={jobId}）
-            </span>
-          )}
-          {createDone !== null && (
-            <p data-testid="create-done" style={{ color: '#070' }}>
-              建群完成
-              {createDone.groupId !== null && (
-                <>
-                  ：
-                  <Link to={`/groups/${createDone.groupId}`}>{createDone.groupId.slice(0, 8)}</Link>
-                </>
+        {writable && (
+          <Card title="建群" data-testid="create-group-form" className="self-start">
+            <div className="flex flex-col gap-4">
+              <Field label="群主账号（creator）">
+                <Select
+                  data-testid="create-creator"
+                  value={creator}
+                  onChange={(e) => setCreator(e.target.value)}
+                >
+                  <option value="">—</option>
+                  {onlineAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.platformUserId ?? a.id}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <fieldset className="rounded-md border border-hairline p-3">
+                <legend className="px-1 text-xs text-ink-subtle">
+                  成员账号（online，不含群主）
+                </legend>
+                {memberCandidates.length === 0 ? (
+                  <span data-testid="create-no-members" className="text-xs text-ink-tertiary">
+                    （无可选 online 账号）
+                  </span>
+                ) : (
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                    {memberCandidates.map((a) => (
+                      <label
+                        key={a.id}
+                        className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-muted"
+                      >
+                        <input
+                          type="checkbox"
+                          data-testid={`create-member-${a.id}`}
+                          checked={members.has(a.id)}
+                          onChange={() => toggleMember(a.id)}
+                          className="h-3.5 w-3.5 cursor-pointer accent-[#5e6ad2]"
+                        />
+                        <span className="font-mono">{a.platformUserId ?? a.id}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </fieldset>
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="primary"
+                  data-testid="create-submit"
+                  disabled={jobId !== null}
+                  onClick={() => void createGroup()}
+                >
+                  <Plus size={14} aria-hidden />
+                  建群
+                </Button>
+                {jobId !== null && (
+                  <span
+                    data-testid="create-progress"
+                    className="inline-flex items-center gap-1.5 text-xs text-ink-subtle"
+                  >
+                    <Loader2 size={13} className="animate-spin" aria-hidden />
+                    建群中…（jobId={jobId}）
+                  </span>
+                )}
+              </div>
+              {createDone !== null && (
+                <p
+                  data-testid="create-done"
+                  className="rounded-md border border-ok/40 bg-ok/10 px-3 py-2 text-sm text-ok"
+                >
+                  建群完成
+                  {createDone.groupId !== null && (
+                    <>
+                      ：
+                      <Link
+                        to={`/groups/${createDone.groupId}`}
+                        className="font-mono underline underline-offset-2 hover:text-ink"
+                      >
+                        {createDone.groupId.slice(0, 8)}
+                      </Link>
+                    </>
+                  )}
+                </p>
               )}
-            </p>
-          )}
-          {createError !== null && (
-            <p role="alert" data-testid="create-error" style={{ color: '#b00' }}>
-              {createError}
-            </p>
-          )}
-        </section>
-      )}
+              {createError !== null && (
+                <p
+                  role="alert"
+                  data-testid="create-error"
+                  className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+                >
+                  {createError}
+                </p>
+              )}
+            </div>
+          </Card>
+        )}
+      </div>
     </main>
   );
 }

@@ -2,6 +2,7 @@
 // 形态逐字：items Map<msgId ?? clientMsgId, Row>；WS message 经 mergeTimelineItem 原地 patch；
 // 「加载更早」before 游标栈只向前翻页；WS 未知键 → 重拉首屏窗口 mergeTimelinePage 'top'；
 // sentAt 上移不重排（排序以服务端为准）；own 消息徽标 deliveryStatus（failed/cancelled 含 failCode）。
+import { History, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiClient } from '../api/client.js';
 import { isApiError } from '../api/client.js';
@@ -12,6 +13,8 @@ import {
   rowKeyOf,
   type TimelineItems,
 } from '../timeline/merge.js';
+import { EmptyState } from '../ui/primitives.js';
+import { DELIVERY_TONE } from '../ui/status.js';
 import { useWsEvent } from '../ws/useWsEvent.js';
 
 const PAGE_SIZE = 50;
@@ -136,42 +139,59 @@ export function Timeline(props: TimelineProps): JSX.Element {
 
   return (
     <section data-testid="timeline">
-      <h2>时间线</h2>
       {error !== null && (
-        <p role="alert" data-testid="timeline-error" style={{ color: '#b00' }}>
+        <p
+          role="alert"
+          data-testid="timeline-error"
+          className="mb-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
           {error}
         </p>
       )}
       {rows.length === 0 && !loading ? (
-        <p data-testid="timeline-empty">暂无消息</p>
+        <EmptyState data-testid="timeline-empty" icon={<History size={20} aria-hidden />}>
+          暂无消息
+        </EmptyState>
       ) : (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
+        <ul className="divide-y divide-hairline/60">
           {rows.map((row) => {
             const key = rowKeyOf(row);
             const badge = statusBadge(row);
+            const badgeTone =
+              row.deliveryStatus !== null
+                ? (DELIVERY_TONE[row.deliveryStatus] ?? 'neutral')
+                : 'warn';
             return (
               <li
                 key={key ?? row.clientMsgId ?? row.msgId ?? `${row.senderPlatformUserId}:${row.sentAt}`}
                 data-testid={key !== null ? `tl-${key}` : undefined}
-                style={{ padding: '0.35rem 0', borderBottom: '1px solid #f0f0f0' }}
+                className="flex items-baseline gap-2 py-2"
               >
-                <span style={{ color: '#555' }}>{row.senderPlatformUserId}</span>
+                <span className="shrink-0 font-mono text-xs text-info">
+                  {row.senderPlatformUserId}
+                </span>
                 {row.isOwn && badge !== '' && (
                   <span
                     data-testid={key !== null ? `tl-badge-${key}` : undefined}
-                    style={{
-                      marginLeft: '0.4rem',
-                      color:
-                        row.deliveryStatus === 'failed' || row.deliveryStatus === 'cancelled'
-                          ? '#c00'
-                          : '#070',
-                    }}
+                    className={`shrink-0 font-mono text-[11px] ${
+                      badgeTone === 'danger'
+                        ? 'text-danger'
+                        : badgeTone === 'ok'
+                          ? 'text-ok'
+                          : badgeTone === 'info'
+                            ? 'text-info'
+                            : badgeTone === 'warn'
+                              ? 'text-warn'
+                              : 'text-ink-subtle'
+                    }`}
                   >
                     [{badge}]
                   </span>
                 )}
-                <span style={{ marginLeft: '0.5rem' }}>{row.text}</span>
-                <span style={{ marginLeft: '0.5rem', color: '#aaa', fontSize: '0.8em' }}>
+                <span className="min-w-0 flex-1 break-words text-sm text-ink-muted">
+                  {row.text}
+                </span>
+                <span className="shrink-0 font-mono text-[11px] text-ink-tertiary">
                   {row.sentAt}
                 </span>
               </li>
@@ -180,7 +200,13 @@ export function Timeline(props: TimelineProps): JSX.Element {
         </ul>
       )}
       {cursor !== null && (
-        <button type="button" onClick={() => void loadEarlier()} disabled={loading}>
+        <button
+          type="button"
+          onClick={() => void loadEarlier()}
+          disabled={loading}
+          className="mt-3 inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-hairline bg-surface-1 px-3 py-1.5 text-xs text-ink-muted transition-colors duration-150 hover:border-hairline-strong hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading && <Loader2 size={12} className="animate-spin" aria-hidden />}
           {loading ? '加载中…' : '加载更早'}
         </button>
       )}
