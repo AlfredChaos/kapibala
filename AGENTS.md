@@ -119,3 +119,15 @@ docs/            需求与拆解
 - 根因：dup-id 在 `turn_received`（步 3 已把响应体落 raw_response）之后才判定，`recordProtocolErrorStep` 不传 rawResponse 时 UPDATE 无条件覆写 `$4` → 冲成 NULL
 - 修复：UPDATE 改 `raw_response=COALESCE($4, raw_response)`——未给新值时保留既有体；BAD_JSON/TURN_TIMEOUT 路径仍显式传入不受影响
 - 防再犯：同列「记录后改写」的 UPDATE 一律考虑既有值是否需要 COALESCE 保留
+
+### 2026-09-28 测试伪造 member_joined 早于网关真实入群 → promote 竞态
+- 症状：`create-group-job.test.ts` 全量并行运行时偶发 failed（job errors=promote/NOT_MEMBER_YET），单跑必过
+- 根因：测试绕过 SSE 手工投 `handleEventFrame` 伪帧，job context 立即全 joined → 转 promote；而 mock 的真实入群在 `setTimeout(100–1500ms)` 里才 add 成员。promote 先撞 NOT_MEMBER_YET，重试 1s 内定时器未 fire（并行负载放大延迟）→ calls≥2 → failed。真实部署该序天然成立（发帧即已入群），伪帧打破了序前提
+- 修复：投递伪帧前轮询 mock `GET /groups/:id/members` 等真实入群落地（`waitGatewayMember`），序与真实路径一致
+- 防再犯：回归 = 原用例（并行负载下复现）；凡「手工投事件帧 + 依赖网关内部状态时序」的测试，先确认事件序的前提状态已在网关侧成立
+
+### 2026-09-28 WS auth→水位间隙被兜底同步灌全表
+- 症状：`sinceseq.test.ts` 并行负载下偶发收到 `sinceSeq` 之前的行（如 sinceSeq=1 却收到 seq 1）
+- 根因：`handleFrame` 里 `conn.authed=true` 后、`lastSentSeq` 还需一次 `min/max` 聚合查询才落定；该窗口内 `syncAll`（poll/notify）对 conn 只检 `authed`，以初值 `lastSentSeq=0` 把全表灌入——authed 语义只管「能不能推」，不管「水位是不是真值」
+- 修复：Connection 加 `ready` 字段，`sync()` 首行 `if (!conn.ready) return`；auth 路径在 `lastSentSeq` 赋值完成后才置 `ready=true` 再自启首轮 `sync`
+- 防再犯：回归测试 server/tests/ws/sinceseq.test.ts（并行负载下复现）；凡「状态分多步异步初始化」的连接/实体，中间态必须对兜底路径不可见——加独立闸门字段，勿复用上一个语义近似但覆盖不全的标志位

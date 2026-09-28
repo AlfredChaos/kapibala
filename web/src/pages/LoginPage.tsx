@@ -1,7 +1,7 @@
 // 登录页（T-P5-01；DES/15 §2 页面 1、REQ §4、DES/09 §5）。
 // 契约：POST /api/auth/login → 存 access（refresh 走 HttpOnly cookie，本页不碰）；
 // 错误按 error.code 显示（UNAUTHORIZED = 用户名或密码错误——服务端统一文案不区分）；
-// 成功跳 /accounts。
+// 成功跳 /dashboard（工作台是落地页——DES/15 §2 页面 2；早前版本写 /accounts 已过时）。
 import { LogIn } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';

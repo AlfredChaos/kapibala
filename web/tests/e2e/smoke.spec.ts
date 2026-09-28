@@ -43,7 +43,7 @@ test('C3：登录 → 打开群 → 看到 agent run 的步骤（kind/工具名�
   await page.fill('#login-username', 'admin');
   await page.fill('#login-password', 'admin');
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/accounts/, { timeout: 15_000 });
+  await page.waitForURL(/\/dashboard/, { timeout: 15_000 }); // 登录落地页 = 工作台（DES/15 §2 页面 2）
 
   // 打开群详情（页面 3：run 列表区块含最近 run 入口）
   await page.goto(`/groups/${state.groupId}`);
