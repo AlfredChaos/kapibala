@@ -10,7 +10,7 @@
 import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from 'react-router-dom';
 import { AuthProvider, useAuth, type AuthState } from '../src/auth/AuthProvider.js';
 import { GroupDetailPage } from '../src/pages/GroupDetailPage.js';
 import { TEXT_MAX_LENGTH as WEB_MAX, validateSendText } from '../src/lib/text-limits.js';
@@ -188,8 +188,14 @@ describe('群详情页', () => {
   let container: HTMLDivElement;
   let root: Root;
   let auth: { current: AuthState | null } = { current: null };
+  const nav: { current: NavigateFunction | null } = { current: null };
 
-  async function mount(role: 'admin' | 'viewer'): Promise<void> {
+  function NavGrab(): null {
+    nav.current = useNavigate();
+    return null;
+  }
+
+  async function mount(role: 'admin' | 'viewer', entry: string = '/groups/g-1'): Promise<void> {
     container = document.createElement('div');
     document.body.appendChild(container);
     function Grab(): null {
@@ -208,7 +214,9 @@ describe('群详情页', () => {
             createElement(Grab),
             createElement(
               MemoryRouter,
-              { initialEntries: ['/groups/g-1'] },
+              { initialEntries: [entry] },
+              // router 内挂 NavGrab 抓 navigate——同页 :id A→B 切换的驱动面（Routes 只收 Route 子节点，挂旁边）
+              createElement(NavGrab),
               createElement(
                 Routes,
                 null,
@@ -362,5 +370,79 @@ describe('群详情页', () => {
     });
     expect(caught).toBeInstanceOf(Object);
     expect((caught as { status?: number }).status).toBe(403);
+  });
+
+  it('GROUP_NOT_FOUND → 「群不存在」终态，不再叠「加载中…」假象', async () => {
+    // 未知群 id：详情 404（GROUP_NOT_FOUND），run 列表同样 404（静默兜底，不盖主页态）
+    const fn = (async (input: RequestInfo | URL) => {
+      const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+      if (path === '/api/auth/login') {
+        return jsonResponse(200, {
+          accessToken: 't-admin',
+          expiresAt: 'x',
+          user: { id: 'u-1', username: 'admin', role: 'admin' },
+        });
+      }
+      if (path === '/api/groups/g-404' || path === '/api/groups/g-404/agent-runs') {
+        return jsonResponse(404, {
+          error: { code: 'GROUP_NOT_FOUND', message: 'unknown group: g-404', requestId: 'r-1' },
+        });
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+    vi.stubGlobal('fetch', fn);
+
+    await mount('admin', '/groups/g-404');
+    expect(container.querySelector('[data-testid="group-not-found"]')?.textContent).toContain(
+      '群不存在',
+    );
+    expect(container.textContent).not.toContain('加载中…');
+  });
+
+  it('同页 A→B 换 id：in-flight 不复用 A 的「群不存在」/旧详情（复位读态）', async () => {
+    // A=g-404（NOT_FOUND 已落定）→ B=g-b 拉取挂起：in-flight 必须显示加载中而非 A 的判决
+    const resolves: Array<() => void> = [];
+    const fn = (async (input: RequestInfo | URL) => {
+      const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+      if (path === '/api/auth/login') {
+        return jsonResponse(200, {
+          accessToken: 't-admin',
+          expiresAt: 'x',
+          user: { id: 'u-1', username: 'admin', role: 'admin' },
+        });
+      }
+      if (path === '/api/groups/g-404' || path === '/api/groups/g-404/agent-runs') {
+        return jsonResponse(404, {
+          error: { code: 'GROUP_NOT_FOUND', message: 'unknown group: g-404', requestId: 'r-1' },
+        });
+      }
+      if (path === '/api/groups/g-b' || path === '/api/groups/g-b/agent-runs') {
+        return new Promise<Response>((resolve) => {
+          resolves.push(() =>
+            resolve(jsonResponse(200, path.endsWith('/agent-runs') ? [] : GROUP_FIXTURE)),
+          );
+        });
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+    vi.stubGlobal('fetch', fn);
+
+    await mount('admin', '/groups/g-404');
+    expect(container.querySelector('[data-testid="group-not-found"]')).not.toBeNull();
+
+    // A→B：拉取 in-flight——旧 404 判决必须消失，回到诚实的「加载中…」
+    await act(async () => {
+      nav.current?.('/groups/g-b');
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="group-not-found"]')).toBeNull();
+    expect(container.textContent).toContain('加载中…');
+
+    // B 落地：新详情渲染，群不存在标记彻底退场
+    await act(async () => {
+      for (const r of resolves) r();
+    });
+    expect(container.querySelector('[data-testid="group-not-found"]')).toBeNull();
+    expect(container.querySelector('[data-testid="toggle-agentEnabled"]')).not.toBeNull();
   });
 });

@@ -32,6 +32,19 @@ export function AgentRunPage(): JSX.Element {
     void reload();
   }, [reload]);
 
+  // 运行中轻量轮询（审计修复）：run.status 非终态时 3s 重拉 steps——
+  // WS 终态帧是主通道（下方 useWsEvent），轮询补「帧丢/补发缺口/订阅窗口」的盲区；
+  // 终态（finished|failed|blocked|cancelled）或卸载即清定时器。live 布尔作 dep：
+  // running→running 的 status 翻动不重开表，running→终态精确收一次。
+  const live = detail !== null && !TERMINAL_STATUSES.has(detail.status);
+  useEffect(() => {
+    if (!live) return undefined;
+    const timer = setInterval(() => {
+      void reload();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [live, reload]);
+
   // 卡片 b 逐字：run 终态（WS agent_run）→ 重拉详情拿全量 steps
   useWsEvent('agent_run', (f) => {
     if (f.payload.runId !== id) return;
@@ -51,7 +64,10 @@ export function AgentRunPage(): JSX.Element {
   return (
     <main style={{ fontFamily: 'sans-serif', maxWidth: '56rem', margin: '2rem auto' }}>
       <p>
-        <Link to={`/groups/${detail?.groupId ?? ''}`}>← 返回群详情</Link>
+        {/* groupId 未知（加载失败/详情未回）→ 退回群列表，不产出 /groups/ 空尾巴链接 */}
+        <Link to={detail?.groupId ? `/groups/${detail.groupId}` : '/groups'}>
+          {detail?.groupId ? '← 返回群详情' : '← 返回群列表'}
+        </Link>
       </p>
       <h1>Agent Run {id ?? ''}</h1>
       {error !== null && (
@@ -59,9 +75,9 @@ export function AgentRunPage(): JSX.Element {
           {error}
         </p>
       )}
-      {detail === null ? (
+      {detail === null && error === null ? (
         <p>加载中…</p>
-      ) : (
+      ) : detail === null ? null : ( // 已有错误 alert 在前——不再叠「加载中…」假象
         <>
           {prominent && (
             <div

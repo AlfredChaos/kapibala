@@ -99,10 +99,12 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-function installFetch(detail: AgentRunDetailView): {
+function installFetch(detail: AgentRunDetailView | (() => AgentRunDetailView)): {
   calls: Array<{ path: string; init: RequestInit }>;
+  detailCalls: { value: number };
 } {
   const calls: Array<{ path: string; init: RequestInit }> = [];
+  const detailCalls = { value: 0 };
   const fn = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
     calls.push({ path, init: init ?? {} });
@@ -113,11 +115,14 @@ function installFetch(detail: AgentRunDetailView): {
         user: { id: 'u-1', username: 'admin', role: 'admin' },
       });
     }
-    if (path === '/api/agent-runs/run-1') return jsonResponse(200, detail);
+    if (path === '/api/agent-runs/run-1') {
+      detailCalls.value += 1;
+      return jsonResponse(200, typeof detail === 'function' ? detail() : detail);
+    }
     return jsonResponse(404, {});
   }) as typeof fetch;
   vi.stubGlobal('fetch', fn);
-  return { calls };
+  return { calls, detailCalls };
 }
 
 class FakeSocket implements WebSocketLike {
@@ -174,8 +179,10 @@ describe('agent run 详情页', () => {
   let root: Root;
   let auth: { current: AuthState | null } = { current: null };
 
-  async function mount(detail: AgentRunDetailView = RUN_DETAIL): Promise<void> {
-    installFetch(detail);
+  async function mount(
+    detail: AgentRunDetailView | (() => AgentRunDetailView) = RUN_DETAIL,
+  ): Promise<{ detailCalls: { value: number } }> {
+    const { detailCalls } = installFetch(detail);
     container = document.createElement('div');
     document.body.appendChild(container);
     function Grab(): null {
@@ -212,6 +219,7 @@ describe('agent run 详情页', () => {
       await auth.current?.login('admin', 'admin');
     });
     getWsClient()?.connect();
+    return { detailCalls };
   }
 
   afterEach(async () => {
@@ -403,5 +411,116 @@ describe('agent run 详情页', () => {
     const link = container.querySelector('a[href="/agent-runs/run-1"]');
     expect(link).not.toBeNull();
     expect(link?.textContent).toBe('run-1');
+  });
+
+  it('加载失败 → role=alert 可见、返回链回落 /groups、不叠「加载中…」', async () => {
+    // 详情 404：AGENT_RUN_NOT_FOUND 信封——错误必须可见且回链不带空尾巴
+    const fn = (async (input: RequestInfo | URL) => {
+      const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+      if (path === '/api/auth/login') {
+        return jsonResponse(200, {
+          accessToken: 't',
+          expiresAt: 'x',
+          user: { id: 'u', username: 'admin', role: 'admin' },
+        });
+      }
+      if (path === '/api/agent-runs/run-1') {
+        return jsonResponse(404, {
+          error: { code: 'AGENT_RUN_NOT_FOUND', message: 'unknown agent run: run-1', requestId: 'r-1' },
+        });
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+    vi.stubGlobal('fetch', fn);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    function Grab(): null {
+      auth.current = useAuth();
+      return null;
+    }
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(
+          StrictMode,
+          null,
+          createElement(
+            AuthProvider,
+            null,
+            createElement(Grab),
+            createElement(
+              MemoryRouter,
+              { initialEntries: ['/agent-runs/run-1'] },
+              createElement(
+                Routes,
+                null,
+                createElement(Route, {
+                  path: '/agent-runs/:id',
+                  element: createElement(AgentRunPage),
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+    });
+    await act(async () => {
+      await auth.current?.login('admin', 'admin');
+    });
+
+    const alert = [...container.querySelectorAll('[role="alert"]')].find((el) =>
+      (el.textContent ?? '').includes('AGENT_RUN_NOT_FOUND'),
+    );
+    expect(alert).not.toBeUndefined();
+    expect(container.textContent).not.toContain('加载中…');
+    // groupId 未知 → 回链落 /groups（不是 /groups/ 空尾巴）
+    const back = container.querySelector('a[href="/groups"]');
+    expect(back).not.toBeNull();
+    expect(container.querySelector('a[href="/groups/"]')).toBeNull();
+  });
+
+  it('status=running → 3s 轮询重拉 steps；终态帧到 → 停表', async () => {
+    vi.useFakeTimers();
+    try {
+      let currentDetail: AgentRunDetailView = {
+        ...RUN_DETAIL,
+        status: 'running',
+        endReason: null,
+        steps: RUN_DETAIL.steps.slice(0, 2),
+      };
+      const { detailCalls } = await mount(() => currentDetail);
+      const sock = lastSocket();
+      await act(async () => {
+        sock.simulateOpen();
+        sock.simulateMessage({ type: 'auth', success: true });
+      });
+      const base = detailCalls.value;
+      // running：每 3s 重拉一次详情（含 steps）
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(detailCalls.value).toBe(base + 1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(detailCalls.value).toBe(base + 2);
+      // 终态帧到 → 定时器清，不再轮询
+      currentDetail = RUN_DETAIL_FINISHED;
+      await act(async () => {
+        sock.simulateMessage({
+          seq: 11,
+          type: 'agent_run',
+          payload: { runId: 'run-1', groupId: 'g-1', status: 'finished', endReason: 'final' },
+        });
+      });
+      const settled = detailCalls.value;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(9000);
+      });
+      expect(detailCalls.value).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -93,8 +93,9 @@ export function AccountsPage(): JSX.Element {
 
   const doTransition = useCallback(
     async (account: AccountListItem, to: AccountStatus, rateLimitedUntil?: string) => {
+      // 释放账号（→suspended）是终态转移：先确认再 POST（REQ §4 页面 2「不可恢复」门槛）
+      if (to === 'suspended' && !window.confirm('释放后账号不可恢复，确认？')) return;
       setPending(account.id);
-      setPanelError(null);
       try {
         await client.request(`/api/accounts/${account.id}/transition`, {
           method: 'POST',

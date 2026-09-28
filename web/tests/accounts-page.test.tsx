@@ -415,4 +415,41 @@ describe('账号列表页渲染与转移面板', () => {
       'disconnected',
     );
   });
+
+  it('释放账号（→suspended 终态）：先 confirm——取消不发请求，确认才发 transition', async () => {
+    const { calls } = installFetch('admin');
+    // happy-dom 无 window.confirm 实现 → 直接挂到 window 上（stubGlobal 只补 globalThis）
+    let answer = false;
+    const hadConfirm = Object.prototype.hasOwnProperty.call(window, 'confirm');
+    const prevConfirm = window.confirm;
+    Object.assign(window, { confirm: () => answer });
+    try {
+      await mount('admin');
+      const releaseBtn = [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === '释放账号',
+      );
+      expect(releaseBtn).toBeDefined();
+
+      // 取消：transition 请求不得发出
+      await act(async () => {
+        releaseBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(calls.filter((c) => c.path.endsWith('/transition')).length).toBe(0);
+
+      // 确认：POST /api/accounts/:id/transition {to:'suspended', expectedFrom 当前状态}
+      answer = true;
+      await act(async () => {
+        releaseBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const post = calls.find((c) => c.path === '/api/accounts/a-online/transition');
+      expect(post).toBeDefined();
+      expect(JSON.parse(String(post?.init.body))).toEqual({
+        to: 'suspended',
+        expectedFrom: 'online',
+      });
+    } finally {
+      if (hadConfirm) window.confirm = prevConfirm;
+      else Reflect.deleteProperty(window, 'confirm');
+    }
+  });
 });

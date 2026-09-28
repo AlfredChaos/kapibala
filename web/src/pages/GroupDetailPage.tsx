@@ -34,14 +34,22 @@ export function GroupDetailPage(): JSX.Element {
   const [runs, setRuns] = useState<AgentRunView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toggleBusy, setToggleBusy] = useState(false);
+  // 404/GROUP_NOT_FOUND 终态标识：区别于瞬时错误——不再渲染「加载中…」，改「群不存在」
+  const [notFound, setNotFound] = useState(false);
 
   const reloadGroup = useCallback(async (): Promise<void> => {
     if (id === undefined) return;
     try {
       setGroup(await client.request<GroupView>(`/api/groups/${id}`));
       setError(null);
+      setNotFound(false); // 同页换 id 重进（组件复用）时清掉旧的 404 终态
     } catch (err) {
-      setError(errorText(err));
+      if (isApiError(err) && (err.code === 'GROUP_NOT_FOUND' || err.status === 404)) {
+        setNotFound(true);
+        setError(null); // 「群不存在」区块即错误呈现——不再叠通用 alert
+      } else {
+        setError(errorText(err));
+      }
     }
   }, [client, id]);
 
@@ -55,6 +63,13 @@ export function GroupDetailPage(): JSX.Element {
   }, [client, id]);
 
   useEffect(() => {
+    // 同页 A→B 换 id（组件实例复用）：拉取前先复位读态——
+    // 不带这步，in-flight 期间会挂着 A 的「群不存在」/旧详情渲染 B（review 实锤假阳性）。
+    // 复位只在 id 切换路径（本 effect），不放 reloadGroup 内部：toggle 后重拉要保留详情显示。
+    setGroup(null);
+    setRuns(null);
+    setError(null);
+    setNotFound(false);
     void reloadGroup();
     void reloadRuns();
   }, [reloadGroup, reloadRuns]);
@@ -133,8 +148,10 @@ export function GroupDetailPage(): JSX.Element {
           {error}
         </p>
       )}
-      {group === null ? (
-        <p>加载中…</p>
+      {notFound ? (
+        <p role="alert" data-testid="group-not-found">群不存在（{id ?? ''}）</p>
+      ) : group === null ? (
+        error === null ? <p>加载中…</p> : null // 瞬时错误已有 alert——不叠加载假象
       ) : (
         <>
           <section>
