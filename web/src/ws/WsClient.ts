@@ -93,6 +93,8 @@ export interface WsClient {
   disconnect(): void;
   /** useWsEvent 底座的订阅 API（type 精确收窄 payload） */
   subscribe<T extends WsEventType>(type: T, handler: WsEventHandler<T>): () => void;
+  /** 全类型订阅（仪表盘实时 feed 用）：一次注册收全部事件帧；帧已过 lastSeq 去重 */
+  subscribeAll(handler: (frame: WsEventFrame) => void): () => void;
   /** ws_backlog_expired 专用收口：页面级兜底 refetch 在此挂（DES/15 §3 末条、DES/08 §2.2） */
   onBacklogExpired(handler: () => void): () => void;
   /** 当前持久化水位（观测/断言用） */
@@ -277,6 +279,23 @@ export function createWsClient(deps: WsClientDeps): WsClient {
       } catch {
         /* 幂等 */
       }
+    },
+    subscribeAll(handler) {
+      // 复用 subscribe 注册面：全类型各挂一条轻量转发（dispatch 仍按 type 分派）
+      const types: readonly WsEventType[] = [
+        'account_status_changed',
+        'account_terminal',
+        'inconsistency',
+        'message',
+        'agent_run',
+        'sequence_run',
+        'group_updated',
+        'job',
+      ];
+      const unsubs = types.map((t) => this.subscribe(t, handler));
+      return () => {
+        for (const u of unsubs) u();
+      };
     },
     subscribe(type, handler) {
       let set = subscribers.get(type);

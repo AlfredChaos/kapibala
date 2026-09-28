@@ -1,22 +1,34 @@
-// 全局导航壳（DES/15 §1 路由表 + §2 页面骨架、REQ §4 页面框架）。
-// 挂载点：router.tsx 的 RequireAuth——守卫通过后所有 authed 页面共享顶栏。
-// 三块：① 左 NavLink 组（账号/群/序列，当前路由加粗+下划线）；② 右侧 username + role + 登出；
-// ③ RealtimeBanner：WS inconsistency 帧（DES/08 §2.2/§2.3）收口——
+// 全局工作台壳（侧边栏形态；DES/15 §1 路由表 + §2 页面骨架、REQ §4 页面框架）。
+// 挂载点：router.tsx 的 RequireAuth——守卫通过后所有 authed 页面共享侧栏。
+// 布局：左侧固定 240px 侧栏（品牌 + 工作台/账号/群/序列导航 + 底部用户卡）；
+// 右侧内容列顶部保留 RealtimeBanner：WS inconsistency 帧（DES/08 §2.2/§2.3）收口——
 //   kind='ws_backlog_expired' → 常驻红条「连接积压已过期，数据可能不完整」+「重新加载」
 //   （lastSeq 水位失效：补发窗口过期，页面数据可能不完整，用户动作兜底 = 整页重载）——
 //   走 DES/15 §3 末条设计收口 useWsBacklogExpired（WsClient.onBacklogExpired 的 React 侧
 //   接线），inconsistency 订阅里同 kind 帧跳过避免双条；
 //   其余 kind → 可关闭琥珀条（原文 kind/message 透出——对账告警逐字展示）。
+import {
+  LayoutDashboard,
+  LogOut,
+  MessageSquare,
+  ListOrdered,
+  TriangleAlert,
+  Users,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider.js';
+import { cx } from '../ui/cx.js';
 import { useWsBacklogExpired, useWsEvent } from '../ws/useWsEvent.js';
 
-const NAV_ITEMS = [
-  { to: '/accounts', label: '账号' },
-  { to: '/groups', label: '群' },
-  { to: '/sequences', label: '序列' },
-] as const;
+const NAV_ITEMS: ReadonlyArray<{ to: string; label: string; icon: LucideIcon }> = [
+  { to: '/dashboard', label: '工作台', icon: LayoutDashboard },
+  { to: '/accounts', label: '账号', icon: Users },
+  { to: '/groups', label: '群', icon: MessageSquare },
+  { to: '/sequences', label: '序列', icon: ListOrdered },
+];
 
 /** 实时告警横幅：inconsistency 帧按 kind 分流（DES/08 §2.2 ws_backlog_expired 为页面级兜底） */
 function RealtimeBanner(): JSX.Element | null {
@@ -35,12 +47,13 @@ function RealtimeBanner(): JSX.Element | null {
         <div
           role="alert"
           data-testid="ws-backlog-expired-banner"
-          style={{ background: '#c00', color: '#fff', padding: '0.4rem 1rem' }}
+          className="flex items-center justify-center gap-3 border-b border-danger/50 bg-danger/15 px-4 py-2 text-sm text-danger"
         >
+          <TriangleAlert size={14} aria-hidden />
           连接积压已过期，数据可能不完整
           <button
             type="button"
-            style={{ marginLeft: '0.8rem' }}
+            className="cursor-pointer rounded-sm border border-danger/50 px-2 py-0.5 text-xs transition-colors duration-150 hover:bg-danger/20"
             onClick={() => window.location.reload()}
           >
             重新加载
@@ -51,21 +64,19 @@ function RealtimeBanner(): JSX.Element | null {
         <div
           role="alert"
           data-testid="ws-inconsistency-banner"
-          style={{
-            background: '#fff3cd',
-            color: '#664d03',
-            padding: '0.4rem 1rem',
-            borderBottom: '1px solid #ffe69c',
-          }}
+          className="flex items-center justify-center gap-3 border-b border-warn/40 bg-warn/10 px-4 py-2 text-sm text-warn"
         >
-          {alert.kind}：{alert.message}
+          <TriangleAlert size={14} aria-hidden />
+          <span className="min-w-0 flex-1 text-center">
+            {alert.kind}：{alert.message}
+          </span>
           <button
             type="button"
             aria-label="关闭"
-            style={{ marginLeft: '0.8rem' }}
+            className="cursor-pointer rounded-sm p-0.5 transition-colors duration-150 hover:bg-warn/20"
             onClick={() => setAlert(null)}
           >
-            ×
+            <X size={14} aria-hidden />
           </button>
         </div>
       )}
@@ -87,43 +98,67 @@ export function AppShell(props: { children: ReactNode }): JSX.Element {
     navigate('/login', { replace: true });
   }
 
+  const initials = (session?.user.username ?? '?').slice(0, 1).toUpperCase();
+
   return (
-    <div style={{ fontFamily: 'sans-serif' }}>
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '1rem',
-          padding: '0.5rem 1rem',
-          borderBottom: '1px solid #ccc',
-        }}
-      >
-        <nav style={{ display: 'flex', gap: '0.8rem' }} aria-label="主导航">
+    <div className="flex min-h-screen bg-canvas text-ink">
+      {/* 侧栏（工作台形态）：品牌 + 主导航 + 底部用户卡 */}
+      <aside className="sticky top-0 flex h-screen w-56 shrink-0 flex-col border-r border-hairline bg-surface-1">
+        <div className="flex items-center gap-2.5 px-4 py-4">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-sm font-semibold text-on-primary">
+            K
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold tracking-tight">kapibala</div>
+            <div className="text-[10px] text-ink-tertiary">运营控制台</div>
+          </div>
+        </div>
+        <nav className="flex flex-col gap-0.5 px-2.5" aria-label="主导航">
           {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
-              style={({ isActive }) => ({
-                fontWeight: isActive ? 'bold' : 'normal',
-                textDecoration: isActive ? 'underline' : 'none',
-                color: 'inherit',
-              })}
+              className={({ isActive }) =>
+                cx(
+                  'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors duration-150',
+                  isActive
+                    ? 'bg-surface-2 font-medium text-ink'
+                    : 'text-ink-subtle hover:bg-surface-2/60 hover:text-ink',
+                )
+              }
             >
+              <item.icon size={15} aria-hidden />
               {item.label}
             </NavLink>
           ))}
         </nav>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
-          <span data-testid="session-user">
-            {session?.user.username}（{session?.user.role}）
-          </span>
-          <button type="button" onClick={() => void onLogout()}>
-            登出
-          </button>
+        <div className="mt-auto border-t border-hairline p-3">
+          <div className="flex items-center gap-2.5 rounded-md px-1.5 py-1">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-medium text-ink-muted">
+              {initials}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div data-testid="session-user" className="truncate text-xs text-ink">
+                {session?.user.username}
+                <span className="text-ink-tertiary">（{session?.user.role}）</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void onLogout()}
+              className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-hairline px-2 py-1 text-xs text-ink-subtle transition-colors duration-150 hover:border-danger/50 hover:bg-danger/10 hover:text-danger"
+            >
+              <LogOut size={12} aria-hidden />
+              登出
+            </button>
+          </div>
         </div>
-      </header>
-      <RealtimeBanner />
-      {props.children}
+      </aside>
+      {/* 内容列：告警横幅 + 页面 */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <RealtimeBanner />
+        <div className="min-w-0 flex-1">{props.children}</div>
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-rou
 import { useAuth } from './auth/AuthProvider.js';
 import { AppShell } from './components/AppShell.js';
 import { LoginPage } from './pages/LoginPage.js';
+import { DashboardPage } from './pages/DashboardPage.js';
 import { AccountsPage } from './pages/AccountsPage.js';
 import { GroupsPage } from './pages/GroupsPage.js';
 import { GroupDetailPage } from './pages/GroupDetailPage.js';
@@ -29,7 +30,8 @@ const router = createBrowserRouter([
   {
     element: <RequireAuth />,
     children: [
-      { path: '/', element: <Navigate to="/accounts" replace /> },
+      { path: '/', element: <Navigate to="/dashboard" replace /> },
+      { path: '/dashboard', element: <DashboardPage /> },
       { path: '/accounts', element: <AccountsPage /> },
       { path: '/groups', element: <GroupsPage /> },
       { path: '/groups/:id', element: <GroupDetailPage /> },

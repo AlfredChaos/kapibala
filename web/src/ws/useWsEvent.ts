@@ -10,6 +10,7 @@
 // - inconsistency toast / ws_backlog_expired 全量 refetch 是订阅者职责
 //   （全局 toast 组件归页面骨架卡；本文件只保证事件可达，收口在 WsClient.onBacklogExpired）。
 import { useEffect, useRef, useSyncExternalStore } from 'react';
+import type { WsEventFrame } from '@kapibala/contract';
 import {
   createWsClient,
   type WsClient,
@@ -77,6 +78,19 @@ export function useWsEvent<T extends WsEventType>(type: T, handler: WsEventHandl
   }, [client, type]);
 }
 
+/**
+ * 全类型订阅（仪表盘实时 feed / 计数器用）：一钩收全部事件帧。
+ * 与 useWsEvent 同一就绪语义（useSyncExternalStore 盯 singleton——装配晚于挂载也必订阅）。
+ */
+export function useWsAll(handler: (frame: WsEventFrame) => void): void {
+  const ref = useRef(handler);
+  ref.current = handler;
+  const client = useSyncExternalStore(subscribeReady, getWsClient);
+  useEffect(() => {
+    if (client === null) return undefined;
+    return client.subscribeAll((frame) => ref.current(frame));
+  }, [client]);
+}
 /**
  * ws_backlog_expired 兜底收口（DES/15 §3 末条：WsClient.onBacklogExpired 的 React 侧接线）。
  * 服务端补发缺口（sinceSeq 超出保留窗）→ 页面级全量 refetch 挂这里。
