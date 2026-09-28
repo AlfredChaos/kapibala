@@ -63,7 +63,7 @@
 - VITEST_PLAN：**125 行矩阵勾选完毕**（T-P7-05 `22397f6` 收口）。
 - 计划评审门：已通过（两审查 PASS + F1–F11 修复落地 + 脚本复查）。
 
-> **终态（2026-09-28 T-P8-05）：DoD 达成，待人类 push/交付。**
+> **终态（2026-09-28）：DoD 达成，已交付 https://github.com/AlfredChaos/kapibala（public，main=90 commits）。**
 >
 > - 四门终验：`pnpm lint` 0 错 · `pnpm typecheck` 5/5 包 Done · `pnpm build` 全 Done（web 271.52 kB）· `pnpm test` 全绿（contract 6 + mock-agent 57 + mock-gateway 120 + web 52 + server 434 = **669 tests**）。
 > - 任务：**73/73 卡全 DONE**（T-P8-05 统一勾选：逐卡比对 `git log` 提交主题——51 张历史遗留未翻状态的卡全部有对应提交，无一悬空；四命令全绿为行为证据）。

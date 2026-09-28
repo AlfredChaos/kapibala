@@ -364,6 +364,12 @@
 - `/_test` 400 返回 `{message}` 非 server 错误信封——正确范围（mock 测试面）。
 - T-P7-03 的 mutation check 未重跑（需改仓文件，超出只读抽查范围）。
 
+## 2026-09-28 交付：push 到公开仓库
+- 做了什么：gh auth 验证（AlfredChaos）→ `gh repo create kapibala --public --source=. --remote=origin --push`；secrets 扫描命中 4 个 `.env.example` 模板（误报，已核内容为占位注释）→ 放行。
+- 验证命令与输出摘录：`gh repo view --json url,isPrivate,defaultBranchRef` → url=https://github.com/AlfredChaos/kapibala, isPrivate=false, defaultBranchRef=main；`git rev-list --count origin/main` → 90；`git log origin/main -1 --oneline` → 7039c0b docs(plan): clear stale in-progress section in HANDOFF；GitHub 页面公开可访问，README 与全文件树渲染正常。
+- 偏差与【解读】：无。
+- 踩坑：无。
+
 <!-- 后续任务条目按上述格式在此追加。示例：
 ## 2026-09-XX T-P0-01 workspace 脚手架
 - 做了什么：…
