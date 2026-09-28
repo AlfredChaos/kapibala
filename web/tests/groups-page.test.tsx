@@ -460,7 +460,7 @@ describe('AppShell（导航壳）', () => {
     container?.remove();
   });
 
-  it('未登录 → /login（守卫逐字）；登录后导航三项 + 用户 + 登出', async () => {
+  it('未登录 → /login（守卫逐字）；登录后导航四项 + 用户 + 登出', async () => {
     installFetch('admin');
     await mountShell('/');
     expect(locOf(container)).toBe('/login'); // 守卫 replace 导回
@@ -471,8 +471,8 @@ describe('AppShell（导航壳）', () => {
     });
     const nav = must(container.querySelector('nav'));
     const hrefs = [...nav.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/accounts', '/groups', '/sequences']);
-    expect(nav.textContent).toBe('账号群序列');
+    expect(hrefs).toEqual(['/dashboard', '/accounts', '/groups', '/sequences']);
+    expect(nav.textContent).toBe('工作台账号群序列');
     expect(container.querySelector('[data-testid="session-user"]')?.textContent).toContain(
       'admin（admin）',
     );
