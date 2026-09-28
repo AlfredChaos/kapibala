@@ -13,6 +13,9 @@ docker compose up -d                  # PostgreSQL 16（容器 kapibala-postgres
 pnpm -F server db:migrate             # 迁移（幂等；dev 启动时也自动跑）
 pnpm -F server db:seed                # 预置 admin/viewer + acc-01..04 服务账号（幂等）
 pnpm dev                              # 并行起 server:3000 + web:5173 + mock-gateway:4100 + mock-agent:4200
+
+# 可选：给 dev 栈灌一批演示数据（2 个群 + 2 条序列；经公共 API 建真群，幂等）
+pnpm -F server db:seed-demo
 ```
 
 然后打开控制台 `http://localhost:5173`，以 `admin` / `admin` 登录。
