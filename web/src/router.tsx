@@ -9,6 +9,7 @@ import { LoginPage } from './pages/LoginPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { AccountsPage } from './pages/AccountsPage.js';
 import { GroupsPage } from './pages/GroupsPage.js';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary.js';
 import { GroupDetailPage } from './pages/GroupDetailPage.js';
 import { AgentRunPage } from './pages/AgentRunPage.js';
 import { SequencesPage } from './pages/SequencesPage.js';
@@ -20,7 +21,10 @@ export function RequireAuth(): JSX.Element {
   if (session === null) return <Navigate to="/login" replace />;
   return (
     <AppShell>
-      <Outlet />
+      {/* 渲染期异常兜底：子树抛错 → 404 视觉页，导航壳保留（用户要求 2026-09-28） */}
+      <RouteErrorBoundary>
+        <Outlet />
+      </RouteErrorBoundary>
     </AppShell>
   );
 }
