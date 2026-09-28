@@ -7,13 +7,15 @@
 // - 转移面板：expectedFrom=当前状态、to 只列合法目标、rate_limited 必填 rateLimitedUntil（D3-4）；
 // - viewer：三枚写按钮 + 面板入口一律不渲染（canWrite 收口；服务端仍是权威——写接口 403）；
 // - WS account_status_changed / account_terminal → 原地更新该行徽标（不整表重拉）。
+import { RefreshCw, UserX, CircleSlash, SlidersHorizontal, Users } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { AccountStatus } from '@kapibala/contract';
 import { isApiError, useAuth, canWrite } from '../auth/AuthProvider.js';
 import { TransitionPanel } from '../components/TransitionPanel.js';
 import { canConnect, legalTargets } from '../lib/account-transitions.js';
+import { StatusBadge, EmptyState, Card } from '../ui/primitives.js';
+import { ACCOUNT_TONE, toneOf } from '../ui/status.js';
 import { useWsEvent } from '../ws/useWsEvent.js';
-
 export interface AccountListItem {
   readonly id: string;
   readonly status: AccountStatus;
@@ -117,92 +119,117 @@ export function AccountsPage(): JSX.Element {
   );
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: '52rem', margin: '2rem auto' }}>
-      <h1>账号列表</h1>
+    <main className="mx-auto w-full max-w-5xl px-5 py-6">
+      <div className="mb-5 flex items-end justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">账号</h1>
+          <p className="mt-0.5 text-xs text-ink-subtle">
+            服务账号健康总览 — 状态、限流倒计时与合法转移
+          </p>
+        </div>
+      </div>
       {error !== null && (
-        <p role="alert" style={{ color: '#b00' }}>
+        <p
+          role="alert"
+          className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
           {error}
         </p>
       )}
       {accounts === null ? (
-        <p>加载中…</p>
+        <p className="py-10 text-center text-sm text-ink-subtle">加载中…</p>
       ) : accounts.length === 0 ? (
-        <p>无账号</p>
+        <EmptyState icon={<Users size={20} aria-hidden />}>无账号</EmptyState>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
-              <th>ID</th>
-              <th>状态</th>
-              <th>platformUserId</th>
-              <th>限流截止</th>
-              {writable && <th>操作</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {accounts.map((a) => {
-              const targets = legalTargets(a.status);
-              return (
-                <tr key={a.id} style={{ borderBottom: '1px solid #eee' }}>
-                  <td>{a.id}</td>
-                  <td>
-                    <span data-testid={`status-badge-${a.id}`}>{a.status}</span>
-                  </td>
-                  <td>{a.platformUserId ?? '—'}</td>
-                  <td>
-                    {a.rateLimitedUntil !== null
-                      ? rateLimitCountdownText(a.rateLimitedUntil, nowMs)
-                      : '—'}
-                  </td>
-                  {writable && (
-                    <td>
-                      {/* REQ §4 逐字：三按钮只在对应转移合法时出现 */}
-                      {canConnect(a.status) && (
-                        <button
-                          type="button"
-                          disabled={pending === a.id}
-                          onClick={() => void doConnect(a.id)}
-                        >
-                          重连
-                        </button>
-                      )}
-                      {targets.includes('disconnected') && (
-                        <button
-                          type="button"
-                          disabled={pending === a.id}
-                          onClick={() => void doTransition(a, 'disconnected')}
-                        >
-                          标记离线
-                        </button>
-                      )}
-                      {targets.includes('suspended') && (
-                        <button
-                          type="button"
-                          disabled={pending === a.id}
-                          onClick={() => void doTransition(a, 'suspended')}
-                        >
-                          释放账号
-                        </button>
-                      )}
-                      {targets.length > 0 && (
-                        <button
-                          type="button"
-                          disabled={pending === a.id}
-                          onClick={() => {
-                            setPanelFor(a);
-                            setPanelError(null);
-                          }}
-                        >
-                          调整状态…
-                        </button>
-                      )}
+        <Card className="overflow-hidden p-0">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-hairline text-left text-xs text-ink-subtle">
+                <th className="px-4 py-2.5 font-medium">ID</th>
+                <th className="px-4 py-2.5 font-medium">状态</th>
+                <th className="px-4 py-2.5 font-medium">platformUserId</th>
+                <th className="px-4 py-2.5 font-medium">限流截止</th>
+                {writable && <th className="px-4 py-2.5 text-right font-medium">操作</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((a) => {
+                const targets = legalTargets(a.status);
+                return (
+                  <tr
+                    key={a.id}
+                    className="border-b border-hairline/60 transition-colors duration-150 last:border-b-0 hover:bg-surface-2"
+                  >
+                    <td className="px-4 py-2.5 font-mono text-xs text-ink-muted">{a.id}</td>
+                    <td className="px-4 py-2.5">
+                      <StatusBadge
+                        tone={toneOf(ACCOUNT_TONE, a.status)}
+                        data-testid={`status-badge-${a.id}`}
+                      >
+                        {a.status}
+                      </StatusBadge>
                     </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <td className="px-4 py-2.5 font-mono text-xs text-ink-subtle">
+                      {a.platformUserId ?? '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-ink-subtle">
+                      {a.rateLimitedUntil !== null
+                        ? rateLimitCountdownText(a.rateLimitedUntil, nowMs)
+                        : '—'}
+                    </td>
+                    {writable && (
+                      <td className="px-4 py-2">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* REQ §4 逐字：三按钮只在对应转移合法时出现 */}
+                          {canConnect(a.status) && (
+                            <RowAction
+                              icon={<RefreshCw size={13} aria-hidden />}
+                              disabled={pending === a.id}
+                              onClick={() => void doConnect(a.id)}
+                            >
+                              重连
+                            </RowAction>
+                          )}
+                          {targets.includes('disconnected') && (
+                            <RowAction
+                              icon={<UserX size={13} aria-hidden />}
+                              disabled={pending === a.id}
+                              onClick={() => void doTransition(a, 'disconnected')}
+                            >
+                              标记离线
+                            </RowAction>
+                          )}
+                          {targets.includes('suspended') && (
+                            <RowAction
+                              icon={<CircleSlash size={13} aria-hidden />}
+                              danger
+                              disabled={pending === a.id}
+                              onClick={() => void doTransition(a, 'suspended')}
+                            >
+                              释放账号
+                            </RowAction>
+                          )}
+                          {targets.length > 0 && (
+                            <RowAction
+                              icon={<SlidersHorizontal size={13} aria-hidden />}
+                              disabled={pending === a.id}
+                              onClick={() => {
+                                setPanelFor(a);
+                                setPanelError(null);
+                              }}
+                            >
+                              调整状态…
+                            </RowAction>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Card>
       )}
       {panelFor !== null && (
         <TransitionPanel
@@ -214,5 +241,30 @@ export function AccountsPage(): JSX.Element {
         />
       )}
     </main>
+  );
+}
+
+/** 行内动作小按钮（视觉一致性收口：图标 + 文案，危险项标红描边） */
+function RowAction(props: {
+  readonly icon: React.ReactNode;
+  readonly danger?: boolean;
+  readonly disabled?: boolean;
+  readonly onClick: () => void;
+  readonly children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      disabled={props.disabled}
+      onClick={props.onClick}
+      className={`inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${
+        props.danger === true
+          ? 'border-danger/40 text-danger hover:bg-danger/10'
+          : 'border-hairline text-ink-muted hover:border-hairline-strong hover:bg-surface-2 hover:text-ink'
+      }`}
+    >
+      {props.icon}
+      {props.children}
+    </button>
   );
 }

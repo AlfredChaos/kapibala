@@ -2,11 +2,13 @@
 // 契约：选成员账号 + text；前端先做非空与 TEXT_MAX_LENGTH 校验（§2 逐字「前端先做」），
 // 非法直接拦不发请求；合法 → POST /api/groups/:id/send → 202 {clientMsgId}。
 // viewer 不渲染本组件（调用方 canWrite 收口；服务端写路径仍 403 兜底）。
+import { Send } from 'lucide-react';
 import { useState } from 'react';
 import { isApiError } from '../api/client.js';
 import type { ApiClient } from '../api/client.js';
 import { validateSendText, TEXT_MAX_LENGTH } from '../lib/text-limits.js';
 import type { GroupMemberView } from '../lib/api-types.js';
+import { Button, Field, Select, Textarea } from '../ui/primitives.js';
 
 export interface SendFormProps {
   readonly groupId: string;
@@ -61,50 +63,72 @@ export function SendForm(props: SendFormProps): JSX.Element {
     <form
       data-testid="send-form"
       onSubmit={(e) => void onSubmit(e)}
-      style={{ border: '1px solid #ddd', padding: '0.75rem', marginTop: '1rem' }}
+      className="flex flex-col gap-3"
     >
-      <h3>发送消息</h3>
-      <label htmlFor="send-account">发送账号</label>
-      <select
-        id="send-account"
-        value={accountId}
-        onChange={(e) => setAccountId(e.target.value)}
-        disabled={busy}
-      >
-        {props.members.map((m) => (
-          <option key={m.accountId} value={m.accountId}>
-            {m.platformUserId}（{m.accountId} · {m.role}）
-          </option>
-        ))}
-      </select>
-      <div>
-        <label htmlFor="send-text">消息内容</label>
-        <textarea
+      <div className="flex gap-3">
+        <Field label="发送账号" htmlFor="send-account" className="w-64">
+          <Select
+            id="send-account"
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            disabled={busy}
+          >
+            {props.members.map((m) => (
+              <option key={m.accountId} value={m.accountId}>
+                {m.platformUserId}（{m.accountId} · {m.role}）
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      <Field label="消息内容" htmlFor="send-text">
+        <Textarea
           id="send-text"
           value={text}
           onChange={(e) => setText(e.target.value)}
           disabled={busy}
           rows={3}
-          style={{ display: 'block', width: '100%' }}
         />
-        <small>
+      </Field>
+      <div className="flex items-center justify-between">
+        <small className="font-mono text-[11px] text-ink-tertiary">
           {text.length}/{TEXT_MAX_LENGTH}
         </small>
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={busy || submitError !== null || props.members.length === 0}
+        >
+          <Send size={13} aria-hidden />
+          发送
+        </Button>
       </div>
       {(validationError ?? null) !== null && (
-        <p role="alert" data-testid="send-validation" style={{ color: '#b00' }}>
+        <p
+          role="alert"
+          data-testid="send-validation"
+          className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
           {validationError}
         </p>
       )}
       {error !== null && (
-        <p role="alert" data-testid="send-error" style={{ color: '#b00' }}>
+        <p
+          role="alert"
+          data-testid="send-error"
+          className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
           {error}
         </p>
       )}
-      {sentId !== null && <p data-testid="send-accepted">已受理：{sentId}</p>}
-      <button type="submit" disabled={busy || submitError !== null || props.members.length === 0}>
-        发送
-      </button>
+      {sentId !== null && (
+        <p
+          data-testid="send-accepted"
+          className="rounded-md border border-ok/40 bg-ok/10 px-3 py-2 text-sm text-ok"
+        >
+          已受理：{sentId}
+        </p>
+      )}
     </form>
   );
 }

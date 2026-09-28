@@ -7,14 +7,17 @@
 //   WS sequence_run 帧推进 currentStepIndex/status 并同步重拉详情拿步级 sentAt）。
 // 定义列表数据源：GET /api/sequences（DES/15 §2 页面 5 数据源行「GET（定义列表）」——后端端点见
 // design/README 解释声明 #27）。列表内容由服务端裁决，刷新页面不再丢定义。
+import { ArrowLeft, ListOrdered, Play, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { isApiError, useAuth } from '../auth/AuthProvider.js';
 import { PreflightModal } from '../components/PreflightModal.js';
 import { SequenceForm, type SequenceDraft } from '../components/SequenceForm.js';
 import type { GroupView, SequenceListItem, SequenceRunView } from '../lib/api-types.js';
+import { cx } from '../ui/cx.js';
+import { Button, Card, EmptyState, Field, Input, Select, StatusBadge, Textarea } from '../ui/primitives.js';
+import { RUN_TONE, STEP_TONE, toneOf } from '../ui/status.js';
 import { useWsEvent } from '../ws/useWsEvent.js';
-
 export function SequencesPage(): JSX.Element {
   const { client } = useAuth();
   const [sequences, setSequences] = useState<SequenceListItem[]>([]);
@@ -148,183 +151,247 @@ export function SequencesPage(): JSX.Element {
   const editingSteps = sequences.find((s) => s.id === launchSeqId)?.steps ?? [];
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: '60rem', margin: '2rem auto' }}>
-      <p>
-        <Link to="/groups">← 返回群列表</Link>
+    <main className="mx-auto w-full max-w-6xl px-5 py-6">
+      <p className="mb-3">
+        <Link
+          to="/groups"
+          className="inline-flex items-center gap-1 text-xs text-ink-subtle transition-colors duration-150 hover:text-ink"
+        >
+          <ArrowLeft size={12} aria-hidden />
+          返回群列表
+        </Link>
       </p>
-      <h1>序列</h1>
+      <div className="mb-5">
+        <h1 className="text-xl font-semibold tracking-tight text-ink">序列</h1>
+        <p className="mt-0.5 text-xs text-ink-subtle">
+          定时序列 — 定义、启动（先预检）与运行进度
+        </p>
+      </div>
       {error !== null && (
-        <p role="alert" style={{ color: '#b00' }}>
+        <p
+          role="alert"
+          className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
           {error}
         </p>
       )}
 
-      <SequenceForm
-        highlightStepIndex={precheckHit?.stepIndex ?? null}
-        highlightKey={precheckHit?.key ?? null}
-        onDefine={define}
-      />
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <SequenceForm
+          highlightStepIndex={precheckHit?.stepIndex ?? null}
+          highlightKey={precheckHit?.key ?? null}
+          onDefine={define}
+        />
 
-      {/* 已定义序列（GET /api/sequences 的服务端列表） */}
-      <section>
-        <h3>已定义序列</h3>
-        {sequences.length === 0 ? (
-          <p data-testid="seq-empty">（暂无定义）</p>
-        ) : (
-          <ul>
-            {sequences.map((s) => (
-              <li key={s.id} data-testid={`seq-item-${s.id}`}>
-                <code>{s.id}</code> {s.name}（{s.steps.length} 步）
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+        {/* 已定义序列（GET /api/sequences 的服务端列表） */}
+        <Card title="已定义序列" className="self-start">
+          {sequences.length === 0 ? (
+            <EmptyState data-testid="seq-empty" icon={<ListOrdered size={20} aria-hidden />}>
+              （暂无定义）
+            </EmptyState>
+          ) : (
+            <ul className="divide-y divide-hairline/60">
+              {sequences.map((s) => (
+                <li
+                  key={s.id}
+                  data-testid={`seq-item-${s.id}`}
+                  className="flex items-center gap-2 py-2 text-sm"
+                >
+                  <code className="font-mono text-xs text-info">{s.id}</code>
+                  <span className="min-w-0 flex-1 truncate text-ink-muted">{s.name}</span>
+                  <span className="shrink-0 text-xs text-ink-tertiary">
+                    （{s.steps.length} 步）
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
 
       {/* 启动表单 */}
-      <section data-testid="launch-form" style={{ border: '1px solid #ddd', padding: '0.8rem' }}>
-        <h3>启动 run</h3>
-        <label>
-          群：
-          <select
-            data-testid="launch-group"
-            value={launchGroupId}
-            onChange={(e) => setLaunchGroupId(e.target.value)}
-          >
-            <option value="">—</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.gatewayGroupId ?? g.id}
-              </option>
-            ))}
-          </select>
-        </label>{' '}
-        <label>
-          序列：
-          <select
-            data-testid="launch-seq"
-            value={launchSeqId}
-            onChange={(e) => setLaunchSeqId(e.target.value)}
-          >
-            <option value="">—</option>
-            {sequences.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div>
-          <label>
-            vars（JSON）：
-            <textarea
+      <Card title="启动 run" data-testid="launch-form" className="mt-5">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-4">
+            <Field label="群" className="w-64">
+              <Select
+                data-testid="launch-group"
+                value={launchGroupId}
+                onChange={(e) => setLaunchGroupId(e.target.value)}
+              >
+                <option value="">—</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.gatewayGroupId ?? g.id}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="序列" className="w-64">
+              <Select
+                data-testid="launch-seq"
+                value={launchSeqId}
+                onChange={(e) => setLaunchSeqId(e.target.value)}
+              >
+                <option value="">—</option>
+                {sequences.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Field label="vars（JSON）">
+            <Textarea
               data-testid="launch-vars"
               rows={2}
-              style={{ width: '100%', fontFamily: 'monospace' }}
+              className="font-mono text-xs"
               value={varsText}
               onChange={(e) => setVarsText(e.target.value)}
             />
-          </label>
-        </div>
-        {/* 选中序列的步骤行——422 stepIndex/key 定位时在此高亮出错行（页面 5 逐字） */}
-        {editingSteps.length > 0 && (
-          <ol style={{ listStyle: 'none', padding: 0 }} data-testid="launch-steps">
-            {editingSteps.map((s) => {
-              const hit = precheckHit !== null && s.index === precheckHit.stepIndex;
-              return (
-                <li
-                  key={s.index}
-                  data-testid={`launch-step-${s.index}`}
-                  style={{
-                    padding: '0.2rem 0.4rem',
-                    border: hit ? '2px solid #c00' : undefined,
-                    background: hit ? '#fdecec' : undefined,
-                  }}
-                >
-                  #{s.index} {s.accountRole} delay={s.delaySeconds}s — {s.text}
-                  {hit && precheckHit.key !== null && (
-                    <span data-testid={`launch-hit-${s.index}`} style={{ color: '#c00' }}>
-                      {' '}⚠ {'{'}
-                      {precheckHit.key}
-                      {'}'} 未解析
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-        <div>
-          <label>
-            stepVars（JSON，{'{ "<index>": { "key": "value" } }'} 形态）：
-            <textarea
+          </Field>
+          {/* 选中序列的步骤行——422 stepIndex/key 定位时在此高亮出错行（页面 5 逐字） */}
+          {editingSteps.length > 0 && (
+            <ol data-testid="launch-steps" className="flex flex-col gap-1.5">
+              {editingSteps.map((s) => {
+                const hit = precheckHit !== null && s.index === precheckHit.stepIndex;
+                return (
+                  <li
+                    key={s.index}
+                    data-testid={`launch-step-${s.index}`}
+                    className={cx(
+                      'rounded-md border px-3 py-2 font-mono text-xs transition-colors duration-150',
+                      hit
+                        ? 'border-danger/60 bg-danger/10 text-danger'
+                        : 'border-hairline bg-surface-2/40 text-ink-muted',
+                    )}
+                  >
+                    #{s.index} {s.accountRole} delay={s.delaySeconds}s — {s.text}
+                    {hit && precheckHit.key !== null && (
+                      <span
+                        data-testid={`launch-hit-${s.index}`}
+                        className="ml-2 inline-flex items-center gap-1 font-semibold text-danger"
+                      >
+                        <TriangleAlert size={12} aria-hidden /> ⚠ {'{'}
+                        {precheckHit.key}
+                        {'}'} 未解析
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          <Field label={'stepVars（JSON，{ "<index>": { "key": "value" } } 形态）'}>
+            <Textarea
               data-testid="launch-stepvars"
               rows={2}
-              style={{ width: '100%', fontFamily: 'monospace' }}
+              className="font-mono text-xs"
               value={stepVarsText}
               onChange={(e) => setStepVarsText(e.target.value)}
             />
-          </label>
+          </Field>
+          {/* 预检失败行高亮（编辑区步骤行；非本序列时只显示定位信息） */}
+          {precheckHit !== null && editingSteps.length > 0 && (
+            <p
+              data-testid="precheck-hit-banner"
+              className="flex items-center gap-1.5 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-sm text-danger"
+            >
+              <TriangleAlert size={14} aria-hidden />
+              步骤 {precheckHit.stepIndex}
+              {precheckHit.key !== null ? ` 的占位符 {${precheckHit.key}}` : ''} 未解析
+            </p>
+          )}
+          {launchError !== null && (
+            <p
+              role="alert"
+              data-testid="launch-error"
+              className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+            >
+              {launchError}
+            </p>
+          )}
+          <div>
+            <Button
+              variant="primary"
+              data-testid="launch-submit"
+              onClick={() => void launch()}
+            >
+              <Play size={13} aria-hidden />
+              预检并启动
+            </Button>
+          </div>
         </div>
-        {/* 预检失败行高亮（编辑区步骤行；非本序列时只显示定位信息） */}
-        {precheckHit !== null && editingSteps.length > 0 && (
-          <p data-testid="precheck-hit-banner" style={{ color: '#c00' }}>
-            步骤 {precheckHit.stepIndex}
-            {precheckHit.key !== null ? ` 的占位符 {${precheckHit.key}}` : ''} 未解析
-          </p>
-        )}
-        {launchError !== null && (
-          <p role="alert" data-testid="launch-error" style={{ color: '#b00' }}>
-            {launchError}
-          </p>
-        )}
-        <button data-testid="launch-submit" onClick={() => void launch()}>
-          预检并启动
-        </button>
-      </section>
+      </Card>
 
       {/* 预检成功弹窗 */}
       <PreflightModal run={preflightRun} onClose={() => setPreflightRun(null)} />
 
       {/* 运行视图 */}
-      <section data-testid="run-view" style={{ border: '1px solid #ddd', padding: '0.8rem' }}>
-        <h3>运行视图</h3>
-        <label>
-          run id：
-          <input
-            data-testid="run-id-input"
-            value={runIdInput}
-            onChange={(e) => setRunIdInput(e.target.value)}
-          />
-        </label>{' '}
-        <button
-          data-testid="run-load"
-          onClick={() => {
-            if (runIdInput !== '') void loadRun(runIdInput);
-          }}
-        >
-          载入
-        </button>
+      <Card title="运行视图" data-testid="run-view" className="mt-5">
+        <div className="flex items-end gap-3">
+          <Field label="run id" className="w-80">
+            <Input
+              data-testid="run-id-input"
+              className="font-mono text-xs"
+              value={runIdInput}
+              onChange={(e) => setRunIdInput(e.target.value)}
+            />
+          </Field>
+          <Button
+            data-testid="run-load"
+            onClick={() => {
+              if (runIdInput !== '') void loadRun(runIdInput);
+            }}
+          >
+            载入
+          </Button>
+        </div>
         {runView !== null && (
-          <div data-testid="run-detail">
-            <p>
-              status=<strong data-testid="run-status">{runView.status}</strong> · currentStepIndex=
-              <strong data-testid="run-current">{runView.currentStepIndex}</strong>
+          <div data-testid="run-detail" className="mt-4">
+            <p className="mb-3 flex items-center gap-2 text-sm text-ink-subtle">
+              status=
+              <StatusBadge
+                tone={toneOf(RUN_TONE, runView.status)}
+                data-testid="run-status"
+              >
+                {runView.status}
+              </StatusBadge>
+              <span className="text-ink-tertiary">·</span>
+              currentStepIndex=
+              <strong data-testid="run-current" className="font-mono text-ink">
+                {runView.currentStepIndex}
+              </strong>
             </p>
-            <ol>
+            <ol className="flex flex-col gap-1.5">
               {currentSteps.map((s) => (
-                <li key={s.index} data-testid={`run-step-${s.index}`}>
-                  <span data-testid={`run-step-status-${s.index}`}>{s.status}</span>
-                  {' · '}scheduledAt=
-                  <span data-testid={`run-step-scheduled-${s.index}`}>{s.scheduledAt ?? '—'}</span>
-                  {' · '}sentAt=
+                <li
+                  key={s.index}
+                  data-testid={`run-step-${s.index}`}
+                  className="flex items-center gap-2 rounded-md border border-hairline bg-surface-2/40 px-3 py-2 font-mono text-xs text-ink-muted"
+                >
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface-3 text-[10px] text-ink-subtle">
+                    {s.index}
+                  </span>
+                  <StatusBadge
+                    tone={toneOf(STEP_TONE, s.status)}
+                    data-testid={`run-step-status-${s.index}`}
+                  >
+                    {s.status}
+                  </StatusBadge>
+                  <span className="text-ink-tertiary">scheduledAt=</span>
+                  <span data-testid={`run-step-scheduled-${s.index}`}>
+                    {s.scheduledAt ?? '—'}
+                  </span>
+                  <span className="text-ink-tertiary">sentAt=</span>
                   <span data-testid={`run-step-sent-${s.index}`}>{s.sentAt ?? '—'}</span>
                 </li>
               ))}
             </ol>
           </div>
         )}
-      </section>
+      </Card>
     </main>
   );
 }

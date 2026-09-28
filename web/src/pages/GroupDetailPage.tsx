@@ -4,6 +4,7 @@
 // message/sequence_run 等时间线事件归 T-P5-05（本页骨架不含时间线区）。
 // 开关 PATCH /api/groups/:id（admin 可写；viewer 只读 disabled——服务端仍 403 权威）。
 // blocked run → 顶部横幅 + 行标红（页面 3 逐字「醒目提示」；A5 audit_blocked 可见）。
+import { TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { isApiError, useAuth, canWrite } from '../auth/AuthProvider.js';
@@ -12,6 +13,8 @@ import { GroupMembers } from '../components/GroupMembers.js';
 import { SendForm } from '../components/SendForm.js';
 import { Timeline } from '../components/Timeline.js';
 import type { AgentRunView, GroupView } from '../lib/api-types.js';
+import { Card, StatusBadge } from '../ui/primitives.js';
+import { GROUP_TONE, toneOf } from '../ui/status.js';
 import { useWsEvent } from '../ws/useWsEvent.js';
 
 function errorText(err: unknown): string {
@@ -131,85 +134,148 @@ export function GroupDetailPage(): JSX.Element {
   const blockedRuns = (runs ?? []).filter((r) => r.status === 'blocked');
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: '52rem', margin: '2rem auto' }}>
-      <h1>群详情 {id ?? ''}</h1>
+    <main className="mx-auto w-full max-w-6xl px-5 py-6">
+      <div className="mb-4 flex items-center gap-3">
+        <h1 className="text-xl font-semibold tracking-tight text-ink">群详情</h1>
+        <span className="font-mono text-xs text-ink-subtle">{id ?? ''}</span>
+        {group !== null && (
+          <StatusBadge tone={toneOf(GROUP_TONE, group.status)}>{group.status}</StatusBadge>
+        )}
+      </div>
       {/* 页面 3 逐字：blocked 的 run → 顶部横幅醒目提示 */}
       {blockedRuns.length > 0 && (
         <div
           role="alert"
           data-testid="blocked-banner"
-          style={{ background: '#c00', color: '#fff', padding: '0.6rem 0.8rem' }}
+          className="mb-4 flex items-center gap-2 rounded-md border border-danger/50 bg-danger/15 px-3 py-2.5 text-sm font-medium text-danger"
         >
-          ⚠ {blockedRuns.length} 个 agent run 被审计拦截（blocked）——请检查最近 run
+          <TriangleAlert size={15} aria-hidden />⚠ {blockedRuns.length} 个 agent run
+          被审计拦截（blocked）——请检查最近 run
         </div>
       )}
       {error !== null && (
-        <p role="alert" style={{ color: '#b00' }}>
+        <p
+          role="alert"
+          className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
           {error}
         </p>
       )}
       {notFound ? (
-        <p role="alert" data-testid="group-not-found">群不存在（{id ?? ''}）</p>
+        <p
+          role="alert"
+          data-testid="group-not-found"
+          className="rounded-md border border-danger/40 bg-danger/10 px-4 py-6 text-center text-sm text-danger"
+        >
+          群不存在（{id ?? ''}）
+        </p>
       ) : group === null ? (
-        error === null ? <p>加载中…</p> : null // 瞬时错误已有 alert——不叠加载假象
+        error === null ? (
+          <p className="py-10 text-center text-sm text-ink-subtle">加载中…</p>
+        ) : null // 瞬时错误已有 alert——不叠加载假象
       ) : (
-        <>
-          <section>
-            <h2>状态</h2>
-            <p>
-              status={group.status} · gatewayGroupId={group.gatewayGroupId ?? '—'} · creator=
-              {group.creatorAccountId}
-            </p>
-            <label>
-              <input
-                type="checkbox"
-                data-testid="toggle-agentEnabled"
-                checked={group.agentEnabled}
-                disabled={!writable || toggleBusy}
-                onChange={(e) => void toggle('agentEnabled', e.target.checked)}
-              />
-              agentEnabled
-            </label>
-            <label style={{ marginLeft: '1rem' }}>
-              <input
-                type="checkbox"
-                data-testid="toggle-autoKickEnabled"
-                checked={group.autoKickEnabled}
-                disabled={!writable || toggleBusy}
-                onChange={(e) => void toggle('autoKickEnabled', e.target.checked)}
-              />
-              autoKickEnabled
-            </label>
-          </section>
-          <section>
-            <h2>成员</h2>
-            <GroupMembers members={group.members} />
-          </section>
-          {/* 时间线（T-P5-05）：受理后经 optimistic prop 插 queued 占位行；
-              WS message 回填 msgId 沿用同一行键原地更新（后端一行原则前端配合面） */}
-          <Timeline groupId={group.id} client={client} optimistic={optimistic} />
-          {writable && (
-            <SendForm
-              groupId={group.id}
-              members={group.members}
-              client={client}
-              onSent={(res) => {
-                const member = group.members.find((m) => m.accountId === res.accountId);
-                setOptimistic({
-                  clientMsgId: res.clientMsgId,
-                  senderPlatformUserId: member?.platformUserId ?? res.accountId,
-                  text: res.text,
-                  nonce: Date.now(),
-                });
-              }}
-            />
-          )}
-          <section>
-            <h2>最近 agent run</h2>
-            {runs === null ? <p>加载中…</p> : <AgentRunList runs={runs} />}
-          </section>
-        </>
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
+          <div className="flex min-w-0 flex-col gap-5">
+            <Card title="状态">
+              <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
+                <dt className="text-ink-tertiary">gatewayGroupId</dt>
+                <dd className="truncate font-mono text-ink-muted">
+                  {group.gatewayGroupId ?? '—'}
+                </dd>
+                <dt className="text-ink-tertiary">creator</dt>
+                <dd className="truncate font-mono text-ink-muted">{group.creatorAccountId}</dd>
+              </dl>
+              <div className="flex flex-col gap-3">
+                <SwitchRow
+                  label="agentEnabled"
+                  hint="群消息触发 agent run"
+                  testId="toggle-agentEnabled"
+                  checked={group.agentEnabled}
+                  disabled={!writable || toggleBusy}
+                  onChange={(v) => void toggle('agentEnabled', v)}
+                />
+                <SwitchRow
+                  label="autoKickEnabled"
+                  hint="agent 可移除成员"
+                  testId="toggle-autoKickEnabled"
+                  checked={group.autoKickEnabled}
+                  disabled={!writable || toggleBusy}
+                  onChange={(v) => void toggle('autoKickEnabled', v)}
+                />
+              </div>
+            </Card>
+            <Card title={`成员（${group.members.length}）`}>
+              <GroupMembers members={group.members} />
+            </Card>
+          </div>
+          <div className="flex min-w-0 flex-col gap-5">
+            {/* 时间线（T-P5-05）：受理后经 optimistic prop 插 queued 占位行；
+                WS message 回填 msgId 沿用同一行键原地更新（后端一行原则前端配合面） */}
+            <Card title="时间线">
+              <Timeline groupId={group.id} client={client} optimistic={optimistic} />
+            </Card>
+            {writable && (
+              <Card title="发送消息">
+                <SendForm
+                  groupId={group.id}
+                  members={group.members}
+                  client={client}
+                  onSent={(res) => {
+                    const member = group.members.find((m) => m.accountId === res.accountId);
+                    setOptimistic({
+                      clientMsgId: res.clientMsgId,
+                      senderPlatformUserId: member?.platformUserId ?? res.accountId,
+                      text: res.text,
+                      nonce: Date.now(),
+                    });
+                  }}
+                />
+              </Card>
+            )}
+            <Card title="最近 agent run">
+              {runs === null ? (
+                <p className="py-4 text-center text-sm text-ink-subtle">加载中…</p>
+              ) : (
+                <AgentRunList runs={runs} />
+              )}
+            </Card>
+          </div>
+        </div>
       )}
     </main>
+  );
+}
+
+/** 开关行：checkbox 语义不变（测试按 input.checked + change 事件驱动），样式化为 switch */
+function SwitchRow(props: {
+  readonly label: string;
+  readonly hint: string;
+  readonly testId: string;
+  readonly checked: boolean;
+  readonly disabled: boolean;
+  readonly onChange: (value: boolean) => void;
+}): JSX.Element {
+  return (
+    <label
+      className={`flex items-center justify-between gap-3 rounded-md border border-hairline bg-surface-2/40 px-3 py-2 transition-colors duration-150 ${
+        props.disabled ? 'opacity-60' : 'cursor-pointer hover:border-hairline-strong'
+      }`}
+    >
+      <span className="min-w-0">
+        <span className="block font-mono text-xs text-ink">{props.label}</span>
+        <span className="block text-[11px] text-ink-tertiary">{props.hint}</span>
+      </span>
+      <span className="relative inline-flex shrink-0 items-center">
+        <input
+          type="checkbox"
+          data-testid={props.testId}
+          checked={props.checked}
+          disabled={props.disabled}
+          onChange={(e) => props.onChange(e.target.checked)}
+          className="peer h-5 w-9 cursor-pointer appearance-none rounded-full border border-hairline-strong bg-surface-3 transition-colors duration-150 checked:border-primary checked:bg-primary disabled:cursor-not-allowed"
+        />
+        <span className="pointer-events-none absolute left-0.5 h-4 w-4 rounded-full bg-ink-subtle transition-transform duration-150 peer-checked:translate-x-4 peer-checked:bg-on-primary" />
+      </span>
+    </label>
   );
 }

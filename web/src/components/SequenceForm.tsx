@@ -3,9 +3,12 @@
 // server/modules/sequences/define.ts（index 正整数唯一、accountRole∈{admin,member}、
 // text 1..TEXT_MAX_LENGTH、delaySeconds 非负整数）——前端先行拦截，服务端仍真值。
 // 预检失败 422（stepIndex/key）由页面回调 onPrecheckError 定位行（页面 5 逐字「高亮出错步骤行」）。
+import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { TEXT_MAX_LENGTH } from '../lib/text-limits.js';
 import type { SequenceStepDef } from '../lib/api-types.js';
+import { Button, Field, Input, Select, Textarea } from '../ui/primitives.js';
+import { cx } from '../ui/cx.js';
 
 export interface SequenceDraft {
   readonly name: string;
@@ -93,96 +96,123 @@ export function SequenceForm(props: {
   }
 
   return (
-    <section data-testid="sequence-form" style={{ border: '1px solid #ddd', padding: '0.8rem' }}>
-      <h3>序列定义</h3>
-      <label>
-        name：
-        <input
+    <section
+      data-testid="sequence-form"
+      className="rounded-lg border border-hairline bg-surface-1 p-5"
+    >
+      <h3 className="mb-4 text-sm font-medium text-ink-muted">序列定义</h3>
+      <Field label="name" className="mb-4 max-w-sm">
+        <Input
           data-testid="seq-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
-      </label>
-      <ol style={{ listStyle: 'none', padding: 0 }}>
+      </Field>
+      <ol className="flex flex-col gap-2.5">
         {steps.map((s, i) => {
-          const highlighted = props.highlightStepIndex !== null && s.index === props.highlightStepIndex;
+          const highlighted =
+            props.highlightStepIndex !== null && s.index === props.highlightStepIndex;
           return (
             <li
               key={i}
               data-testid={`step-editor-${s.index}`}
-              style={{
-                padding: '0.4rem',
-                marginBottom: '0.3rem',
-                border: highlighted ? '2px solid #c00' : '1px solid #eee',
-                background: highlighted ? '#fdecec' : undefined,
-              }}
+              className={cx(
+                'rounded-md border p-3 transition-colors duration-150',
+                highlighted
+                  ? 'border-danger/60 bg-danger/10'
+                  : 'border-hairline bg-surface-2/40',
+              )}
             >
-              <label>
-                index：
-                <input
-                  data-testid={`step-index-${i}`}
-                  type="number"
-                  style={{ width: '4rem' }}
-                  value={s.index}
-                  onChange={(e) => updateStep(i, { index: Number(e.target.value) })}
-                />
-              </label>{' '}
-              <label>
-                role：
-                <select
-                  data-testid={`step-role-${i}`}
-                  value={s.accountRole}
-                  onChange={(e) =>
-                    updateStep(i, { accountRole: e.target.value === 'admin' ? 'admin' : 'member' })
-                  }
+              <div className="flex flex-wrap items-end gap-3">
+                <Field label="index">
+                  <Input
+                    data-testid={`step-index-${i}`}
+                    type="number"
+                    className="w-20"
+                    value={s.index}
+                    onChange={(e) => updateStep(i, { index: Number(e.target.value) })}
+                  />
+                </Field>
+                <Field label="role">
+                  <Select
+                    data-testid={`step-role-${i}`}
+                    className="w-28"
+                    value={s.accountRole}
+                    onChange={(e) =>
+                      updateStep(i, {
+                        accountRole: e.target.value === 'admin' ? 'admin' : 'member',
+                      })
+                    }
+                  >
+                    <option value="member">member</option>
+                    <option value="admin">admin</option>
+                  </Select>
+                </Field>
+                <Field label="delaySeconds">
+                  <Input
+                    data-testid={`step-delay-${i}`}
+                    type="number"
+                    className="w-24"
+                    value={s.delaySeconds}
+                    onChange={(e) => updateStep(i, { delaySeconds: Number(e.target.value) })}
+                  />
+                </Field>
+                <button
+                  type="button"
+                  data-testid={`step-del-${i}`}
+                  onClick={() => removeStep(i)}
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-danger/40 px-2 py-1.5 text-xs text-danger transition-colors duration-150 hover:bg-danger/10"
                 >
-                  <option value="member">member</option>
-                  <option value="admin">admin</option>
-                </select>
-              </label>{' '}
-              <label>
-                delaySeconds：
-                <input
-                  data-testid={`step-delay-${i}`}
-                  type="number"
-                  style={{ width: '5rem' }}
-                  value={s.delaySeconds}
-                  onChange={(e) => updateStep(i, { delaySeconds: Number(e.target.value) })}
-                />
-              </label>{' '}
-              <button type="button" data-testid={`step-del-${i}`} onClick={() => removeStep(i)}>
-                删
-              </button>
-              <div style={{ marginTop: '0.3rem' }}>
-                <textarea
+                  <Trash2 size={12} aria-hidden />
+                  删
+                </button>
+              </div>
+              <div className="mt-2.5">
+                <Textarea
                   data-testid={`step-text-${i}`}
                   rows={2}
-                  style={{ width: '100%' }}
                   placeholder="text（{key} 占位符由启动参数解析）"
                   value={s.text}
                   onChange={(e) => updateStep(i, { text: e.target.value })}
                 />
               </div>
               {highlighted && (
-                <div data-testid={`step-precheck-hit-${s.index}`} style={{ color: '#c00' }}>
-                  预检未通过的占位符：{props.highlightKey !== null ? `{${props.highlightKey}}` : '?'}
+                <div
+                  data-testid={`step-precheck-hit-${s.index}`}
+                  className="mt-2 rounded-sm bg-danger/15 px-2 py-1 text-xs text-danger"
+                >
+                  预检未通过的占位符：
+                  {props.highlightKey !== null ? `{${props.highlightKey}}` : '?'}
                 </div>
               )}
             </li>
           );
         })}
       </ol>
-      <button type="button" data-testid="step-add" onClick={addStep}>
-        + 加步骤
-      </button>
+      <div className="mt-3 flex items-center gap-2">
+        <Button type="button" size="sm" data-testid="step-add" onClick={addStep}>
+          <Plus size={13} aria-hidden />
+          加步骤
+        </Button>
+      </div>
       {localError !== null && (
-        <p role="alert" style={{ color: '#b00' }}>
+        <p
+          role="alert"
+          className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
           {localError}
         </p>
       )}
-      <button data-testid="seq-submit" disabled={busy} onClick={() => void submit()}>
-        保存序列定义
-      </button>
+      <div className="mt-4">
+        <Button
+          variant="primary"
+          data-testid="seq-submit"
+          disabled={busy}
+          onClick={() => void submit()}
+        >
+          保存序列定义
+        </Button>
+      </div>
     </section>
   );
 }

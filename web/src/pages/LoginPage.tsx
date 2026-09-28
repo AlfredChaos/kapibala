@@ -2,9 +2,11 @@
 // 契约：POST /api/auth/login → 存 access（refresh 走 HttpOnly cookie，本页不碰）；
 // 错误按 error.code 显示（UNAUTHORIZED = 用户名或密码错误——服务端统一文案不区分）；
 // 成功跳 /accounts。
+import { LogIn } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { isApiError, useAuth } from '../auth/AuthProvider.js';
+import { Button, Field, Input } from '../ui/primitives.js';
 
 /** code → 用户可读文案（§2 页面 1：按 error.code 显示） */
 function errorText(err: unknown): string {
@@ -31,7 +33,7 @@ export function LoginPage(): JSX.Element {
 
   // 已登录直接进 console（声明式重定向——渲染期调 navigate 会触发渲染期更新警告）
   if (session !== null) {
-    return <Navigate to="/accounts" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   async function onSubmit(e: FormEvent): Promise<void> {
@@ -41,7 +43,7 @@ export function LoginPage(): JSX.Element {
     setError(null);
     try {
       await login(username, password);
-      navigate('/accounts', { replace: true });
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -50,35 +52,52 @@ export function LoginPage(): JSX.Element {
   }
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: '22rem', margin: '4rem auto' }}>
-      <h1>kapibala console</h1>
-      <form onSubmit={(e) => void onSubmit(e)}>
-        <label htmlFor="login-username">用户名</label>
-        <input
-          id="login-username"
-          autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-        />
-        <label htmlFor="login-password">密码</label>
-        <input
-          id="login-password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        {error !== null && (
-          <p role="alert" style={{ color: 'crimson' }}>
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={busy}>
-          {busy ? '登录中…' : '登录'}
-        </button>
-      </form>
+    <main className="flex min-h-screen items-center justify-center bg-canvas px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-lg font-semibold text-on-primary">
+            K
+          </span>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">kapibala console</h1>
+          <p className="text-sm text-ink-subtle">多账号群组消息平台 · 运营控制台</p>
+        </div>
+        <form
+          onSubmit={(e) => void onSubmit(e)}
+          className="flex flex-col gap-4 rounded-lg border border-hairline bg-surface-1 p-6 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.03)]"
+        >
+          <Field label="用户名" htmlFor="login-username">
+            <Input
+              id="login-username"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="密码" htmlFor="login-password">
+            <Input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </Field>
+          {error !== null && (
+            <p
+              role="alert"
+              className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+            >
+              {error}
+            </p>
+          )}
+          <Button type="submit" variant="primary" disabled={busy} className="mt-1 w-full">
+            <LogIn size={14} aria-hidden />
+            {busy ? '登录中…' : '登录'}
+          </Button>
+        </form>
+      </div>
     </main>
   );
 }

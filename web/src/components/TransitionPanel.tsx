@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import type { AccountStatus } from '@kapibala/contract';
 import { legalTargets } from '../lib/account-transitions.js';
-
+import { Button, Field, Input, Modal, Select } from '../ui/primitives.js';
 export interface TransitionPanelProps {
   /** 打开面板时账号的当前状态（= 提交的 expectedFrom） */
   readonly current: AccountStatus;
@@ -44,56 +44,77 @@ export function TransitionPanel(props: TransitionPanelProps): JSX.Element {
   const canSubmit = !props.pending && to !== '' && (!needsUntil || isValidFutureInstant(until));
 
   return (
-    <section role="dialog" aria-label="状态转移" className="transition-panel">
-      <h3>调整状态</h3>
-      <p>
-        当前状态：<strong data-testid="panel-from">{props.current}</strong>
-      </p>
-      <label htmlFor="transition-to">目标状态</label>
-      <select
-        id="transition-to"
-        value={to}
-        onChange={(e) => setTo(e.target.value as AccountStatus)}
-        disabled={props.pending}
-      >
-        <option value="">选择目标…</option>
-        {targets.map((t) => (
-          <option key={t} value={t}>
-            {STATUS_LABELS[t]}
-          </option>
-        ))}
-      </select>
-      {needsUntil && (
-        <div>
-          <label htmlFor="rate-limited-until">限流截止（rateLimitedUntil，必填）</label>
-          <input
-            id="rate-limited-until"
-            type="datetime-local"
-            value={until}
-            onChange={(e) => setUntil(e.target.value)}
-            disabled={props.pending}
-          />
-        </div>
-      )}
-      {props.error !== null && (
-        <p role="alert" style={{ color: '#b00' }}>
-          {props.error}
+    <Modal
+      title="调整状态"
+      aria-label="状态转移"
+      data-testid="transition-panel"
+      footer={
+        <button
+          type="button"
+          onClick={props.onClose}
+          disabled={props.pending}
+          className="cursor-pointer rounded-sm px-2 py-1 text-xs text-ink-subtle transition-colors duration-150 hover:text-ink"
+        >
+          取消
+        </button>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-ink-subtle">
+          当前状态：
+          <strong data-testid="panel-from" className="ml-1 font-mono text-ink">
+            {props.current}
+          </strong>
         </p>
-      )}
-      <button
-        type="button"
-        disabled={!canSubmit}
-        onClick={() => {
-          if (to === '') return;
-          // datetime-local 是本地时间——提交前转 ISO 8601 UTC（契约字段形状）
-          props.onSubmit(to, needsUntil ? new Date(until).toISOString() : undefined);
-        }}
-      >
-        确认转移
-      </button>
-      <button type="button" onClick={props.onClose} disabled={props.pending}>
-        取消
-      </button>
-    </section>
+        <Field label="目标状态" htmlFor="transition-to">
+          <Select
+            id="transition-to"
+            value={to}
+            onChange={(e) => setTo(e.target.value as AccountStatus)}
+            disabled={props.pending}
+          >
+            <option value="">选择目标…</option>
+            {targets.map((t) => (
+              <option key={t} value={t}>
+                {STATUS_LABELS[t]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {needsUntil && (
+          <Field label="限流截止（rateLimitedUntil，必填）" htmlFor="rate-limited-until">
+            <Input
+              id="rate-limited-until"
+              type="datetime-local"
+              value={until}
+              onChange={(e) => setUntil(e.target.value)}
+              disabled={props.pending}
+            />
+          </Field>
+        )}
+        {props.error !== null && (
+          <p
+            role="alert"
+            className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+          >
+            {props.error}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="primary"
+            disabled={!canSubmit}
+            onClick={() => {
+              if (to === '') return;
+              // datetime-local 是本地时间——提交前转 ISO 8601 UTC（契约字段形状）
+              props.onSubmit(to, needsUntil ? new Date(until).toISOString() : undefined);
+            }}
+          >
+            确认转移
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
