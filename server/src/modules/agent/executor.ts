@@ -75,7 +75,8 @@ export type ToolOutcome =
 
 export interface ToolCallContext {
   readonly client: PoolClient;
-  /** 出站等待用的连接池（事务 client 不能跑长轮询——send_message 的 5s 窗口用） */
+  /** 工具调用上下文连接：普通池连接（autocommit），非事务——工具需要多写原子性的自起 tx()，
+      长等待（send_message 5s / kick 收敛）不得包住未提交写，否则轮询方看不到行（SEND_TIMEOUT 回归） */
   readonly pool: Pool;
   readonly runId: string;
   readonly groupId: string;
@@ -497,14 +498,20 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         }
       }
 
-      // send_message 的幂等预检在审计前（§8.2 KEY 分支逐字：命中即短路、不再审计）
+      // send_message 的幂等预检在审计前（§8.2 KEY 分支逐字：命中即短路、不再审计）。
+      // 读 + 命中等待——普通池连接（不包事务）：命中行是首次调用已提交的产物，
+      // tx 包住等待只会白白占连接。
       if (tool.name === 'send_message') {
-        const hitOutcome = await tx(deps.pool, (c) =>
-          sendMessagePreAudit(
-            { client: c, runId, groupId: run.group_id, input: tool.input },
+        const preClient = await deps.pool.connect();
+        let hitOutcome: ToolOutcome | undefined;
+        try {
+          hitOutcome = await sendMessagePreAudit(
+            { client: preClient, runId, groupId: run.group_id, input: tool.input },
             { pool: deps.pool, waiter: deps.deliveryWaiter },
-          ),
-        );
+          );
+        } finally {
+          preClient.release();
+        }
         if (hitOutcome !== undefined) {
           const content = hitOutcome.type === 'result' ? hitOutcome.content : '{}';
           let hitCode: string | undefined;
@@ -601,10 +608,25 @@ export function createAgentExecutor(deps: AgentExecutorDeps): { startRun(runId: 
         return;
       }
 
+      // 工具执行不包 tx()：上下文是普通池连接（autocommit）。工具需要多写原子性的
+      // （send_message 的 T13）在工具内部自起 tx() 提交后再进入长等待——包一层事务会让
+      // queued 行对 waiter/dispatcher 不可见直到等待结束才提交（SEND_TIMEOUT 回归）。
       const toolExec = deps.executeTool ?? defaultToolExecutor(deps);
-      const outcome = await tx(deps.pool, (c) =>
-        toolExec({ client: c, pool: deps.pool, runId, groupId: run.group_id, stepSeq: seq, toolName: tool.name, input: tool.input }),
-      );
+      const toolClient = await deps.pool.connect();
+      let outcome: ToolOutcome;
+      try {
+        outcome = await toolExec({
+          client: toolClient,
+          pool: deps.pool,
+          runId,
+          groupId: run.group_id,
+          stepSeq: seq,
+          toolName: tool.name,
+          input: tool.input,
+        });
+      } finally {
+        toolClient.release();
+      }
 
       if (outcome.type === 'end_run') {
         const end = await tx(deps.pool, async (client) => {
