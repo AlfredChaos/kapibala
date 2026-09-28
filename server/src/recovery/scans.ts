@@ -10,6 +10,7 @@ import type { Pool } from 'pg';
 import { retryDeadLettersOnce } from '../events/deadletter.js';
 import { runAccountsRecoveryScan } from '../modules/accounts/transitions.js';
 import { runCreateGroupJob } from '../modules/groups/create-job.js';
+import { runLeaveAllJob } from '../modules/groups/leave-all.js';
 import { UNKNOWN_SETTLE_MS } from '../constants.js';
 import type { DispatchRegistry } from '../events/dispatch.js';
 import type { GatewayClient } from '../gateway/client.js';
@@ -92,19 +93,22 @@ export const RECOVERY_SCANS: readonly RecoveryScan[] = [
   {
     // 扫描 4：job WHERE status='running'——按 phase/context 续传
     // （join/leave 不重发，查外部现状判定；DES/04）。
-    // T-P3-06 已接线（create_group 段）：逐 job fire-and-forget 交执行器续传——
-    // advisory lock 单飞（D3-2：交接不同步等完成）；leave_all 段归 T-P3-07。
+    // create_group 段 T-P3-06、leave_all 段 T-P3-07 均已接线：逐 job fire-and-forget 交执行器——
+    // advisory lock 单飞（D3-2：交接不同步等完成）；leave-all 状态外置（job.context.states），
+    // 崩溃重启后同一入口续传剩余成员（总则「任意时刻重启前后都必须成立」）。
     name: 'jobs',
     async run(deps) {
-      const { rows } = await deps.pool.query<{ id: string }>(
-        "SELECT id FROM job WHERE status='running' AND type='create_group'",
+      const { rows } = await deps.pool.query<{ id: string; type: string }>(
+        "SELECT id, type FROM job WHERE status='running' AND type IN ('create_group','leave_all')",
       );
       for (const row of rows) {
-        void runCreateGroupJob({ pool: deps.pool, gateway: deps.gateway, logger: deps.logger }, row.id).catch(
-          (err: unknown) => {
-            deps.logger.error({ err, jobId: row.id }, 'job resume failed; will retry on next boot');
-          },
-        );
+        const runner =
+          row.type === 'leave_all'
+            ? runLeaveAllJob({ pool: deps.pool, gateway: deps.gateway, logger: deps.logger }, row.id)
+            : runCreateGroupJob({ pool: deps.pool, gateway: deps.gateway, logger: deps.logger }, row.id);
+        void runner.catch((err: unknown) => {
+          deps.logger.error({ err, jobId: row.id }, 'job resume failed; will retry on next boot');
+        });
       }
       return rows.length;
     },

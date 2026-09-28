@@ -48,10 +48,12 @@ export async function recordProtocolErrorStep(
   client: PoolClient,
   args: { runId: string; seq: number; code: 'BAD_JSON' | 'DUPLICATE_TOOL_USE_ID' | 'TURN_TIMEOUT'; rawResponse?: string | null; stepCounted?: boolean },
 ): Promise<ProtocolErrorResult> {
+  // raw_response：未给新值时保留既有值——dup-id 在 turn_received 后才判定，row 里已有
+  // 步 3 落库的原始响应体，无条件覆写 $4 会把它冲成 NULL（REQ §2.3 rawResponse 必填）。
   const { rowCount } = await client.query(
     `UPDATE agent_run_step SET kind='protocol_error', status='done', error_code=$3,
             tool_use_id=NULL, name=NULL, input=NULL,
-            raw_response=$4, appended_blocks=$5::jsonb, updated_at=now()
+            raw_response=COALESCE($4, raw_response), appended_blocks=$5::jsonb, updated_at=now()
      WHERE run_id=$1 AND seq=$2 AND status IN ('turn_dispatched','turn_received')`,
     [args.runId, args.seq, args.code, clipRawResponse(args.rawResponse), JSON.stringify(protocolErrorBlocks(args.code))],
   );

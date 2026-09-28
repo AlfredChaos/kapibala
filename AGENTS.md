@@ -108,3 +108,14 @@ docs/            需求与拆解
 - 修复：`EventDispatchContext.defer` 提交后副作用缝（consumer 在 commit 后统一触发）；`trigger-sweep` 加 stale-run lane：`status='running' AND (lease_until IS NULL OR lease_until < now())` 重新 `startAgentRun`（advisory lock 互斥，幂等）
 - 防再犯：事务内禁止直接触发「需要读到本事务行」的异步动作，一律经 defer；executor/恢复路径对 `precheck` 读不到行的 run 要 log 不能静默 return
 
+### 2026-09-28 leave-all job 崩溃后不恢复
+- 症状：server 重启后 `type='leave_all'` 且 `status='running'` 的 job 永久停摆，群成员表与网关不再收敛
+- 根因：恢复扫描「jobs」只查 `type='create_group'`，注释写着「leave_all 段归 T-P3-07」但该接线从未做；`runLeaveAllJob` 唯一调用点是 HTTP 路由，执行器本身可恢复、缺的是重启再驱动
+- 修复：`scans.ts` jobs 扫描改为 `type IN ('create_group','leave_all')`，按 type 分发到 `runCreateGroupJob` / `runLeaveAllJob`（advisory lock 幂等）
+- 防再犯：「归 XX 任务」类占位注释完成后必须回收接线点；新增 job 类型时同步扩展本扫描的 type 白名单
+
+### 2026-09-28 dup tool_use.id 覆盖既有 raw_response
+- 症状：`GET /api/agent-runs/:id` 里 DUPLICATE_TOOL_USE_ID 协议错误步的 rawResponse 为 NULL，看不到原始响应体
+- 根因：dup-id 在 `turn_received`（步 3 已把响应体落 raw_response）之后才判定，`recordProtocolErrorStep` 不传 rawResponse 时 UPDATE 无条件覆写 `$4` → 冲成 NULL
+- 修复：UPDATE 改 `raw_response=COALESCE($4, raw_response)`——未给新值时保留既有体；BAD_JSON/TURN_TIMEOUT 路径仍显式传入不受影响
+- 防再犯：同列「记录后改写」的 UPDATE 一律考虑既有值是否需要 COALESCE 保留

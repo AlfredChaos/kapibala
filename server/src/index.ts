@@ -22,6 +22,7 @@ import { createMessageHandler } from './events/handlers/message.js';
 import { createMemberHandler } from './events/handlers/member.js';
 import { createMessageSentHandler, createMessageFailedHandler } from './events/handlers/confirm.js';
 import { createAgentClient } from './agentclient/index.js';
+import { clampTurnTimeoutMs } from './modules/agent/budget.js';
 import { createAgentExecutor } from './modules/agent/executor.js';
 import { setAgentRunStarter } from './modules/agent/trigger.js';
 import { createGatewayClient, type GatewayClient } from './gateway/client.js';
@@ -127,7 +128,8 @@ export async function boot(options: BootOptions = {}): Promise<BootHandle> {
   const outboundDispatcher = startOutboundDispatcher({ pool, gateway, logger });
   // agent executor 接线（T-P4-05）：agentclient 三段式校验 + 进程内并发闸 + advisory lock；
   // startAgentRun 缝接上真 executor——触发/END2/SWEEP 的 run 创建即刻被拾取（占位→实线）
-  const agentClient = createAgentClient({ baseUrl: config.agentUrl, turnTimeoutMs: config.agentTurnTimeoutMs });
+  // REQ §2.2/A5-2：turn 超时带宽 10–15s（可配）——配置值越界时钳回区间（clamp 接线）
+  const agentClient = createAgentClient({ baseUrl: config.agentUrl, turnTimeoutMs: clampTurnTimeoutMs(config.agentTurnTimeoutMs) });
   setAgentRunStarter(
     createAgentExecutor({
       pool,
