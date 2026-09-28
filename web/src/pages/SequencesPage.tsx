@@ -10,7 +10,7 @@
 import { ArrowLeft, ChevronRight, ListOrdered, Play, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { isApiError, useAuth } from '../auth/AuthProvider.js';
+import { canWrite, isApiError, useAuth } from '../auth/AuthProvider.js';
 import { PreflightModal } from '../components/PreflightModal.js';
 import { SequenceForm, type SequenceDraft } from '../components/SequenceForm.js';
 import type { GroupView, SequenceListItem, SequenceRunView } from '../lib/api-types.js';
@@ -19,7 +19,8 @@ import { Button, Card, EmptyState, Field, Input, Select, StatusBadge, Textarea }
 import { RUN_TONE, STEP_TONE, toneOf } from '../ui/status.js';
 import { useWsEvent } from '../ws/useWsEvent.js';
 export function SequencesPage(): JSX.Element {
-  const { client } = useAuth();
+  const { client, session } = useAuth();
+  const writable = canWrite(session);
   const [sequences, setSequences] = useState<SequenceListItem[]>([]);
   const [groups, setGroups] = useState<GroupView[]>([]);
   // 「已定义序列」行级展开态——点行头看 steps 详情（需求外 UX 补齐，2026-09-28）
@@ -179,11 +180,13 @@ export function SequencesPage(): JSX.Element {
       )}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <SequenceForm
-          highlightStepIndex={precheckHit?.stepIndex ?? null}
-          highlightKey={precheckHit?.key ?? null}
-          onDefine={define}
-        />
+        {writable && (
+          <SequenceForm
+            highlightStepIndex={precheckHit?.stepIndex ?? null}
+            highlightKey={precheckHit?.key ?? null}
+            onDefine={define}
+          />
+        )}
 
         {/* 已定义序列（GET /api/sequences 的服务端列表） */}
         <Card title="已定义序列" className="self-start">
@@ -243,6 +246,7 @@ export function SequencesPage(): JSX.Element {
       </div>
 
       {/* 启动表单 */}
+      {writable && (
       <Card title="启动 run" data-testid="launch-form" className="mt-5">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap gap-4">
@@ -357,6 +361,7 @@ export function SequencesPage(): JSX.Element {
           </div>
         </div>
       </Card>
+      )}
 
       {/* 预检成功弹窗 */}
       <PreflightModal run={preflightRun} onClose={() => setPreflightRun(null)} />
