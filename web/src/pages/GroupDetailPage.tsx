@@ -209,11 +209,8 @@ export function GroupDetailPage(): JSX.Element {
             </Card>
           </div>
           <div className="flex min-w-0 flex-col gap-5">
-            {/* 时间线（T-P5-05）：受理后经 optimistic prop 插 queued 占位行；
-                WS message 回填 msgId 沿用同一行键原地更新（后端一行原则前端配合面） */}
-            <Card title="时间线">
-              <Timeline groupId={group.id} client={client} optimistic={optimistic} />
-            </Card>
+            {/* 布局定序（用户要求 2026-09-28）：发送 + Agent Run 固定在前，
+                时间线（内部滚动的延展窗口）压轴——消息增多不挤压操作区 */}
             {writable && (
               <Card title="发送消息">
                 <SendForm
@@ -238,6 +235,12 @@ export function GroupDetailPage(): JSX.Element {
               ) : (
                 <AgentRunList runs={runs} />
               )}
+            </Card>
+            {/* 时间线（T-P5-05）：受理后经 optimistic prop 插 queued 占位行；
+                WS message 回填 msgId 沿用同一行键原地更新（后端一行原则前端配合面）。
+                组件内部限定视口高度自行滚动（Timeline max-height），卡片不再随行数无限长高 */}
+            <Card title="时间线">
+              <Timeline groupId={group.id} client={client} optimistic={optimistic} />
             </Card>
           </div>
         </div>
