@@ -69,6 +69,10 @@ interface Connection {
   readonly socket: WebSocket;
   /** 认证前不推任何事件（§2.3）；auth:true 回执后才翻 true */
   authed: boolean;
+  /** 水位初值已落定（auth 回执后 lastSentSeq 才由 0 变成真值）。authed→ready 之间
+   *  有两次 DB 查询窗口：兜底 poll/notify 此时同步会以 lastSentSeq=0 灌全表（真实 bug）。
+   *  sync 一律先检本字段——authed 只管「能不能推」，ready 管「水位是不是真值」。 */
+  ready: boolean;
   /** 心跳活性：每轮 ping 前置 false，pong 翻 true；下轮仍 false = 僵死 terminate */
   alive: boolean;
   /** 已推水位（表内 seq；独占语义：下次只取 > lastSentSeq） */
@@ -162,6 +166,7 @@ export function attachWsHub(server: Server, options: WsHubOptions): WsHub {
    * 递归保护：在飞时新数据只记 dirty，落地后由尾部追加下一轮（无并发查询、无乱序）。
    */
   const sync = async (conn: Connection): Promise<void> => {
+    if (!conn.ready) return; // authed 但水位未定——首轮由 auth 路径自己发，别以 0 灌全表
     if (conn.syncing) {
       conn.dirty = true;
       return;
@@ -204,6 +209,7 @@ export function attachWsHub(server: Server, options: WsHubOptions): WsHub {
     const conn: Connection = {
       socket,
       authed: false,
+      ready: false,
       alive: true,
       lastSentSeq: 0,
       queue: [],
@@ -281,6 +287,7 @@ export function attachWsHub(server: Server, options: WsHubOptions): WsHub {
         }]);
       }
     }
+    conn.ready = true; // 水位初值落定——此后兜底同步见到的是真值
     void sync(conn); // 首轮补齐（sinceSeq 起点或实时起点之后的新行）
   };
 

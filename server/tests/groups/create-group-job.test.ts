@@ -64,6 +64,18 @@ describe('POST /api/groups + 建群 job 主链（DES/04 §2.1–2.3）', () => {
     );
   }
 
+  /** 轮询 mock 网关直到成员真实入群（member_joined 定时器已 fire）——伪造帧的序前提 */
+  async function waitGatewayMember(gwGroupId: string, puid: string): Promise<void> {
+    const deadline = Date.now() + 15000;
+    for (;;) {
+      const res = await mockApp.inject({ method: 'GET', url: `/groups/${gwGroupId}/members` });
+      const members = res.json() as Array<{ platformUserId: string }>;
+      if (members.some((m) => m.platformUserId === puid)) return;
+      if (Date.now() > deadline) throw new Error(`gateway member_joined never landed for ${puid}`);
+      await sleep(50);
+    }
+  }
+
   async function jobOf(jobId: string): Promise<JobView> {
     const res = await app.inject({
       method: 'GET',
@@ -212,6 +224,13 @@ describe('POST /api/groups + 建群 job 主链（DES/04 §2.1–2.3）', () => {
     expect(creatorRow[0]?.role).toBe('creator');
     expect(creatorRow[0]?.left_at).toBeNull();
 
+    // 伪造帧注入前必须等网关真实入群：member_joined 的事件序保证「发帧时网关已把成员
+    // 加进 group.members」（mock 在 100–1500ms 定时器里 add+推帧）。测试绕过 SSE 手工投递，
+    // 不先确认成员到位会出现 promote 先于真实入群的窗口：NOT_MEMBER_YET 重试 1s 仍不中 →
+    // calls≥2 → job failed（并行负载下定时器延迟放大才踩中）。poll mock 自身状态消竞态。
+    for (const puid of [puid2, puid3]) {
+      await waitGatewayMember(gwGroupId, puid);
+    }
     // 模拟网关推 member_joined（A3-2：事件路径写成员行 + job context）
     await deliverMemberJoined(gwGroupId, puid2);
     await deliverMemberJoined(gwGroupId, puid3);
