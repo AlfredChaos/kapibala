@@ -37,7 +37,12 @@ pnpm dev                    # 并行启动四个进程：
                             #   server :3000 · web :5173 · mock-gateway :4100 · mock-agent :4200
 ```
 
-打开 `http://localhost:5173`，用 `admin` / `admin` 登录（`viewer` / `viewer` 为只读账号）。
+打开 `http://localhost:5173` 登录。`db:seed` 预置两个用户（密码同用户名，笔试约定）：
+
+| 用户名 | 密码 | 角色 |
+|---|---|---|
+| `admin` | `admin` | 管理员（读写） |
+| `viewer` | `viewer` | 运营（只读，写操作 403） |
 
 ```bash
 pnpm -F server db:seed-demo # 可选：往正在运行的 dev 栈灌演示数据
